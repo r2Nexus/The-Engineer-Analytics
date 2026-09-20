@@ -1,0 +1,443 @@
+﻿/* ============================================================
+   THEME
+   ============================================================ */
+
+:root {
+    --bg: #070b12;
+    --bg-header: #0b1728;
+    --bg-filter: #10223a;
+
+    --panel: #18273d;
+    --panel-alt: #203653;
+    --panel-hover: #253c5b;
+    --header-hover: #2b4669;
+
+    --border: #2b3d55;
+    --border-input: #365875;
+    --border-hover: #4b7295;
+    --border-focus: #6f99c2;
+
+    --text: #eef3f8;
+    --text-soft: #d5dee8;
+    --text-muted: #9baabd;
+    --text-subtle: #718198;
+    --text-faint: #526176;
+
+    --radius: 5px;
+    --radius-small: 3px;
+
+    --page-padding: 32px;
+    --section-gap: 48px;
+}
+
+
+/* ============================================================
+   BASE
+   ============================================================ */
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    color-scheme: dark;
+}
+
+body {
+    margin: 0;
+
+    font-family: Arial, sans-serif;
+
+    background: var(--bg);
+    color: var(--text);
+}
+
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+
+.topbar {
+    padding: 24px var(--page-padding);
+
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+    margin: 0;
+}
+
+.topbar p {
+    margin: 6px 0 0;
+
+    color: var(--text-muted);
+}
+
+
+/* ============================================================
+   FILTER BAR
+   ============================================================ */
+
+.filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+
+    gap: 18px;
+
+    padding: 14px var(--page-padding);
+
+    background: var(--bg-filter);
+    border-bottom: 1px solid var(--border);
+
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+
+    gap: 10px;
+}
+
+.filter-title {
+    margin-right: 12px;
+
+    font-weight: bold;
+}
+
+.filter-group label {
+    color: var(--text-muted);
+}
+
+.range-arrow {
+    margin: 0 4px;
+
+    color: var(--text-subtle);
+}
+
+.filter-summary {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+select {
+    min-width: 120px;
+
+    padding: 8px 12px;
+
+    background: var(--panel-alt);
+    color: var(--text);
+
+    border: 1px solid var(--border-input);
+    border-radius: var(--radius-small);
+}
+
+select:hover {
+    border-color: var(--border-hover);
+}
+
+select:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+
+/* ============================================================
+   PAGE CONTENT
+   ============================================================ */
+
+main {
+    max-width: 1400px;
+
+    margin: 0 auto;
+    padding: var(--page-padding);
+}
+
+section {
+    margin-bottom: var(--section-gap);
+}
+
+section h2 {
+    margin-bottom: 18px;
+}
+
+
+/* ============================================================
+   OVERVIEW STATS
+   ============================================================ */
+
+.stat-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(160px, 1fr));
+
+    gap: 16px;
+}
+
+.stat-card {
+    padding: 18px;
+
+    background: var(--panel);
+
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.stat-card span {
+    display: block;
+
+    margin-bottom: 8px;
+
+    color: var(--text-muted);
+}
+
+.stat-card strong {
+    font-size: 28px;
+}
+
+
+/* ============================================================
+   ASCENSION CHART
+   ============================================================ */
+
+.chart-container {
+    position: relative;
+
+    height: 400px;
+
+    padding: 20px;
+
+    background: var(--panel);
+
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+
+/* ============================================================
+   COLLAPSIBLE SECTIONS
+   ============================================================ */
+
+.collapsible-section {
+    margin-bottom: var(--section-gap);
+}
+
+.collapsible-section:not([open]) {
+    margin-bottom: 24px;
+}
+
+.collapsible-section summary {
+    display: flex;
+    align-items: center;
+
+    gap: 12px;
+
+    cursor: pointer;
+    user-select: none;
+
+    list-style: none;
+}
+
+.collapsible-section summary::-webkit-details-marker {
+    display: none;
+}
+
+.collapsible-section summary h2 {
+    margin: 0 0 18px;
+}
+
+.collapsible-section summary::before {
+    content: "▼";
+
+    margin-bottom: 18px;
+
+    color: var(--text-subtle);
+    font-size: 12px;
+
+    transition: transform 0.15s ease;
+}
+
+.collapsible-section:not([open]) summary::before {
+    transform: rotate(-90deg);
+}
+
+.collapse-hint {
+    margin-bottom: 18px;
+
+    color: var(--text-subtle);
+    font-size: 13px;
+}
+
+
+/* ============================================================
+   TABLE TOOLBAR / SEARCH
+   ============================================================ */
+
+.table-toolbar {
+    display: flex;
+    justify-content: flex-start;
+
+    margin-bottom: 12px;
+}
+
+.table-search {
+    width: 260px;
+
+    padding: 9px 12px;
+
+    background: var(--panel);
+    color: var(--text);
+
+    border: 1px solid var(--border-input);
+    border-radius: var(--radius-small);
+
+    font-size: 14px;
+}
+
+.table-search::placeholder {
+    color: var(--text-subtle);
+}
+
+.table-search:hover {
+    border-color: var(--border-hover);
+}
+
+.table-search:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+
+/* ============================================================
+   TABLES
+   ============================================================ */
+
+.table-wrapper {
+    overflow-x: auto;
+
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+table {
+    width: 100%;
+
+    border-collapse: collapse;
+
+    background: var(--panel);
+}
+
+th,
+td {
+    padding: 12px 14px;
+
+    border-bottom: 1px solid var(--border);
+
+    text-align: left;
+}
+
+th {
+    background: var(--panel-alt);
+    color: var(--text-soft);
+}
+
+tbody tr:hover {
+    background: var(--panel-hover);
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+
+/* ============================================================
+   SORTABLE TABLES
+   ============================================================ */
+
+.sortable th[data-sort] {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.sortable th[data-sort]:hover {
+    background: var(--header-hover);
+}
+
+.sortable th[data-sort]::after {
+    content: " ↕";
+
+    color: var(--text-faint);
+    font-size: 12px;
+}
+
+.sortable th[data-direction="asc"]::after {
+    content: " ↑";
+
+    color: var(--text-muted);
+}
+
+.sortable th[data-direction="desc"]::after {
+    content: " ↓";
+
+    color: var(--text-muted);
+}
+
+
+/* ============================================================
+   MOBILE
+   ============================================================ */
+
+@media (max-width: 700px) {
+
+    :root {
+        --page-padding: 20px;
+    }
+
+    .topbar {
+        padding-top: 20px;
+        padding-bottom: 20px;
+    }
+
+    .filter-bar {
+        align-items: flex-start;
+
+        gap: 10px;
+    }
+
+    .filter-group {
+        width: 100%;
+    }
+
+    .filter-title {
+        width: 100%;
+
+        margin-right: 0;
+        margin-bottom: 4px;
+    }
+
+    .filter-summary {
+        width: 100%;
+
+        white-space: normal;
+    }
+
+    .stat-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .chart-container {
+        height: 320px;
+    }
+
+    .table-search {
+        width: 100%;
+    }
+}

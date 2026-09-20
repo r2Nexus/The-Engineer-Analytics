@@ -1,0 +1,187 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>The Engineer Analytics</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+    <div>
+        <h1>The Engineer Analytics</h1>
+        <p>Slay the Spire 2 mod telemetry dashboard</p>
+    </div>
+</header>
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <span class="filter-title">Version range</span>
+
+        <label for="versionFrom">From</label>
+        <select id="versionFrom">
+        </select>
+
+        <span class="range-arrow">→</span>
+
+        <label for="versionTo">To</label>
+        <select id="versionTo">
+        </select>
+
+        <div id="filterRunCount" class="filter-summary">
+            -
+        </div>
+    </div>
+</div>
+
+<main>
+    <section>
+        <h2>Overview</h2>
+
+        <div class="stat-grid">
+            <div class="stat-card">
+                <span>Runs</span>
+                <strong id="statRuns">-</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Wins</span>
+                <strong id="statWins">-</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Win Rate</span>
+                <strong id="statWinRate">-</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Avg Floor</span>
+                <strong id="statAvgFloor">-</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Avg Deck Size</span>
+                <strong id="statAvgDeck">-</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Avg Relics</span>
+                <strong id="statAvgRelics">-</strong>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Win Rate by Ascension</h2>
+
+        <div class="chart-container">
+            <canvas id="ascensionChart"></canvas>
+        </div>
+    </section>
+
+    <details class="collapsible-section" open>
+        <summary>
+            <h2>Card Stats</h2>
+            <span class="collapse-hint">click to collapse</span>
+        </summary>
+
+        <div class="table-toolbar">
+            <input
+                    type="text"
+                    class="table-search"
+                    data-table="cardTable"
+                    placeholder="Search cards..."
+            >
+        </div>
+
+        <div class="table-wrapper">
+            <table id="cardTable" class="sortable">
+                <thead>
+                <tr>
+                    <th data-sort="string">Card</th>
+                    <th data-sort="number">Offers</th>
+                    <th data-sort="number">Picks</th>
+                    <th data-sort="number">Pick Rate</th>
+                    <th data-sort="number">Runs</th>
+                    <th data-sort="number">Avg Copies</th>
+                    <th data-sort="number">Win Rate</th>
+                </tr>
+                </thead>
+
+                <tbody id="cardTableBody"></tbody>
+            </table>
+        </div>
+    </details>
+
+    <details class="collapsible-section" open>
+        <summary>
+            <h2>Enemy Stats</h2>
+            <span class="collapse-hint">click to collapse</span>
+        </summary>
+
+        <div class="table-toolbar">
+            <input
+                    type="text"
+                    class="table-search"
+                    data-table="enemyTable"
+                    placeholder="Search enemies..."
+            >
+        </div>
+
+        <div class="table-wrapper">
+            <table id="enemyTable" class="sortable">
+                <thead>
+                <tr>
+                    <th data-sort="string">Enemy</th>
+                    <th data-sort="number">Fights</th>
+                    <th data-sort="number">Deaths</th>
+                    <th data-sort="number">Survival Rate</th>
+                    <th data-sort="number">Avg Turns</th>
+                    <th data-sort="number">Avg Damage</th>
+                </tr>
+                </thead>
+
+                <tbody id="enemyTableBody"></tbody>
+            </table>
+        </div>
+    </details>
+
+    <details class="collapsible-section" open>
+        <summary>
+            <h2>Relic Stats</h2>
+            <span class="collapse-hint">click to collapse</span>
+        </summary>
+
+        <div class="table-toolbar">
+            <input
+                    type="text"
+                    class="table-search"
+                    data-table="relicTable"
+                    placeholder="Search relics..."
+            >
+        </div>
+
+        <div class="table-wrapper">
+            <table id="relicTable" class="sortable">
+                <thead>
+                <tr>
+                    <th data-sort="string">Relic</th>
+                    <th data-sort="number">Runs</th>
+                    <th data-sort="number">Win Rate</th>
+                </tr>
+                </thead>
+
+                <tbody id="relicTableBody"></tbody>
+            </table>
+        </div>
+    </details>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
