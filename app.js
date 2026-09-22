@@ -19,6 +19,9 @@ const versionFrom = document.getElementById("versionFrom");
 const versionTo = document.getElementById("versionTo");
 const filterRunCount = document.getElementById("filterRunCount");
 
+const includeForeignMods =
+    document.getElementById("includeForeignMods");
+
 const statRuns = document.getElementById("statRuns");
 const statWins = document.getElementById("statWins");
 const statWinRate = document.getElementById("statWinRate");
@@ -28,11 +31,17 @@ const statAvgRelics = document.getElementById("statAvgRelics");
 
 const ascensionChartCanvas =
     document.getElementById("ascensionChart");
-let ascensionChart = null;
 
-const enemyTableBody = document.getElementById("enemyTableBody");
-const cardTableBody = document.getElementById("cardTableBody");
-const relicTableBody = document.getElementById("relicTableBody");
+const enemyTableBody =
+    document.getElementById("enemyTableBody");
+
+const cardTableBody =
+    document.getElementById("cardTableBody");
+
+const relicTableBody =
+    document.getElementById("relicTableBody");
+
+let ascensionChart = null;
 
 
 // ============================================================
@@ -49,11 +58,35 @@ let versions = [];
 async function init() {
     try {
         await loadVersions();
+
+        versionFrom.addEventListener(
+            "change",
+            refreshDashboard
+        );
+
+        versionTo.addEventListener(
+            "change",
+            refreshDashboard
+        );
+
+        if (includeForeignMods) {
+            includeForeignMods.addEventListener(
+                "change",
+                refreshDashboard
+            );
+        }
+
+        enableTableSorting();
+        enableTableSearch();
+
         await refreshDashboard();
     }
     catch (error) {
         console.error(error);
-        alert("Failed to load analytics. Check the console.");
+
+        alert(
+            "Failed to load analytics. Check the console."
+        );
     }
 }
 
@@ -68,69 +101,167 @@ async function loadVersions() {
 
     const { data, error } = await db
         .from("analytics_overview")
-        .select("mod_version,runs,latest_run");
+        .select(
+            "mod_version,latest_run,has_foreign_content"
+        );
 
     if (error) {
         throw error;
     }
 
-    versions = data
-        .filter(row =>
-            row.mod_version &&
-            row.mod_version.toUpperCase() !== "TEST"
-        )
-        .sort((a, b) =>
-            compareVersions(a.mod_version, b.mod_version)
+
+    // analytics_overview can now contain two rows per version:
+    //
+    // 1. has_foreign_content = false
+    // 2. has_foreign_content = true
+    //
+    // Collapse those back into one version entry.
+
+    const versionMap = new Map();
+
+    for (const row of data) {
+
+        const version = row.mod_version;
+
+        if (
+            !version ||
+            version.toUpperCase() === "TEST"
+        ) {
+            continue;
+        }
+
+        const existing =
+            versionMap.get(version);
+
+        if (!existing) {
+
+            versionMap.set(version, {
+                mod_version: version,
+                latest_run: row.latest_run
+            });
+
+            continue;
+        }
+
+
+        const existingDate =
+            new Date(existing.latest_run);
+
+        const newDate =
+            new Date(row.latest_run);
+
+        if (newDate > existingDate) {
+            existing.latest_run =
+                row.latest_run;
+        }
+    }
+
+
+    versions = [...versionMap.values()]
+        .sort(
+            (a, b) =>
+                compareVersions(
+                    a.mod_version,
+                    b.mod_version
+                )
         );
+
 
     versionFrom.innerHTML = "";
     versionTo.innerHTML = "";
 
+
     for (const row of versions) {
 
-        const fromOption = document.createElement("option");
-        fromOption.value = row.mod_version;
-        fromOption.textContent = row.mod_version;
+        const fromOption =
+            document.createElement("option");
 
-        const toOption = document.createElement("option");
-        toOption.value = row.mod_version;
-        toOption.textContent = row.mod_version;
+        fromOption.value =
+            row.mod_version;
 
-        versionFrom.appendChild(fromOption);
-        versionTo.appendChild(toOption);
+        fromOption.textContent =
+            row.mod_version;
+
+
+        const toOption =
+            document.createElement("option");
+
+        toOption.value =
+            row.mod_version;
+
+        toOption.textContent =
+            row.mod_version;
+
+
+        versionFrom.appendChild(
+            fromOption
+        );
+
+        versionTo.appendChild(
+            toOption
+        );
     }
+
 
     if (versions.length > 0) {
 
-        // Default = all versions.
-        versionFrom.value = versions[0].mod_version;
-        versionTo.value = versions[versions.length - 1].mod_version;
-    }
+        const defaultFromVersion = "1.0.0";
 
-    versionFrom.addEventListener("change", refreshDashboard);
-    versionTo.addEventListener("change", refreshDashboard);
+        const hasDefaultVersion =
+            versions.some(
+                v =>
+                    v.mod_version ===
+                    defaultFromVersion
+            );
+
+
+        versionFrom.value =
+            hasDefaultVersion
+                ? defaultFromVersion
+                : versions[0].mod_version;
+
+
+        versionTo.value =
+            versions[
+            versions.length - 1
+                ].mod_version;
+    }
 }
 
 
 function compareVersions(a, b) {
 
-    const aParts = a.split(".").map(Number);
-    const bParts = b.split(".").map(Number);
+    const aParts =
+        a.split(".").map(Number);
 
-    const length = Math.max(
-        aParts.length,
-        bParts.length
-    );
+    const bParts =
+        b.split(".").map(Number);
 
-    for (let i = 0; i < length; i++) {
+    const length =
+        Math.max(
+            aParts.length,
+            bParts.length
+        );
 
-        const av = aParts[i] ?? 0;
-        const bv = bParts[i] ?? 0;
+
+    for (
+        let i = 0;
+        i < length;
+        i++
+    ) {
+
+        const av =
+            aParts[i] ?? 0;
+
+        const bv =
+            bParts[i] ?? 0;
+
 
         if (av !== bv) {
             return av - bv;
         }
     }
+
 
     return 0;
 }
@@ -138,24 +269,90 @@ function compareVersions(a, b) {
 
 function getSelectedVersions() {
 
-    const fromIndex = versions.findIndex(
-        v => v.mod_version === versionFrom.value
-    );
+    const fromIndex =
+        versions.findIndex(
+            v =>
+                v.mod_version ===
+                versionFrom.value
+        );
 
-    const toIndex = versions.findIndex(
-        v => v.mod_version === versionTo.value
-    );
+    const toIndex =
+        versions.findIndex(
+            v =>
+                v.mod_version ===
+                versionTo.value
+        );
 
-    if (fromIndex === -1 || toIndex === -1) {
+
+    if (
+        fromIndex === -1 ||
+        toIndex === -1
+    ) {
         return [];
     }
 
-    const start = Math.min(fromIndex, toIndex);
-    const end = Math.max(fromIndex, toIndex);
+
+    const start =
+        Math.min(
+            fromIndex,
+            toIndex
+        );
+
+    const end =
+        Math.max(
+            fromIndex,
+            toIndex
+        );
+
 
     return versions
-        .slice(start, end + 1)
-        .map(v => v.mod_version);
+        .slice(
+            start,
+            end + 1
+        )
+        .map(
+            v => v.mod_version
+        );
+}
+
+
+// ============================================================
+// ANALYTICS QUERY
+// ============================================================
+
+function analyticsQuery(
+    viewName,
+    selectedVersions
+) {
+
+    let query = db
+        .from(viewName)
+        .select("*")
+        .in(
+            "mod_version",
+            selectedVersions
+        );
+
+
+    // Toggle off:
+    // only clean Engineer runs.
+    //
+    // Toggle on:
+    // both clean + runs containing other mods.
+
+    if (
+        !includeForeignMods ||
+        !includeForeignMods.checked
+    ) {
+
+        query = query.eq(
+            "has_foreign_content",
+            false
+        );
+    }
+
+
+    return query;
 }
 
 
@@ -165,13 +362,20 @@ function getSelectedVersions() {
 
 async function refreshDashboard() {
 
-    const selectedVersions = getSelectedVersions();
+    const selectedVersions =
+        getSelectedVersions();
 
-    if (selectedVersions.length === 0) {
+
+    if (
+        selectedVersions.length === 0
+    ) {
         return;
     }
 
-    filterRunCount.textContent = "Loading...";
+
+    filterRunCount.textContent =
+        "Loading...";
+
 
     try {
 
@@ -183,43 +387,80 @@ async function refreshDashboard() {
             relicResult
         ] = await Promise.all([
 
-            db
-                .from("analytics_overview")
-                .select("*")
-                .in("mod_version", selectedVersions),
+            analyticsQuery(
+                "analytics_overview",
+                selectedVersions
+            ),
 
-            db
-                .from("analytics_ascensions")
-                .select("*")
-                .in("mod_version", selectedVersions),
+            analyticsQuery(
+                "analytics_ascensions",
+                selectedVersions
+            ),
 
-            db
-                .from("analytics_enemies")
-                .select("*")
-                .in("mod_version", selectedVersions),
+            analyticsQuery(
+                "analytics_enemies",
+                selectedVersions
+            ),
 
-            db
-                .from("analytics_cards")
-                .select("*")
-                .in("mod_version", selectedVersions),
+            analyticsQuery(
+                "analytics_cards",
+                selectedVersions
+            ),
 
-            db
-                .from("analytics_relics")
-                .select("*")
-                .in("mod_version", selectedVersions)
+            analyticsQuery(
+                "analytics_relics",
+                selectedVersions
+            )
         ]);
 
-        checkError(overviewResult);
-        checkError(ascensionResult);
-        checkError(enemyResult);
-        checkError(cardResult);
-        checkError(relicResult);
 
-        renderOverview(overviewResult.data, selectedVersions);
-        renderAscensions(ascensionResult.data);
-        renderEnemies(enemyResult.data);
-        renderCards(cardResult.data);
-        renderRelics(relicResult.data);
+        checkError(
+            overviewResult
+        );
+
+        checkError(
+            ascensionResult
+        );
+
+        checkError(
+            enemyResult
+        );
+
+        checkError(
+            cardResult
+        );
+
+        checkError(
+            relicResult
+        );
+
+
+        renderOverview(
+            overviewResult.data,
+            selectedVersions
+        );
+
+        renderAscensions(
+            ascensionResult.data
+        );
+
+        renderEnemies(
+            enemyResult.data
+        );
+
+        renderCards(
+            cardResult.data
+        );
+
+        renderRelics(
+            relicResult.data
+        );
+
+
+        // Reapply any active search after
+        // rebuilding table rows.
+
+        applyAllTableSearches();
     }
     catch (error) {
 
@@ -243,38 +484,54 @@ function checkError(result) {
 // OVERVIEW
 // ============================================================
 
-function renderOverview(rows, selectedVersions) {
+function renderOverview(
+    rows,
+    selectedVersions
+) {
 
-    const runs = sum(rows, "runs");
-    const wins = sum(rows, "wins");
-    const losses = sum(rows, "losses");
+    const runs =
+        sum(rows, "runs");
+
+    const wins =
+        sum(rows, "wins");
+
 
     const winRate =
         runs > 0
             ? wins / runs * 100
             : 0;
 
-    const avgFloor = weightedAverage(
-        rows,
-        "avg_floor",
-        "runs"
-    );
 
-    const avgDeck = weightedAverage(
-        rows,
-        "avg_deck_size",
-        "runs"
-    );
+    const avgFloor =
+        weightedAverage(
+            rows,
+            "avg_floor",
+            "runs"
+        );
 
-    const avgRelics = weightedAverage(
-        rows,
-        "avg_relics",
-        "runs"
-    );
+    const avgDeck =
+        weightedAverage(
+            rows,
+            "avg_deck_size",
+            "runs"
+        );
 
-    statRuns.textContent = formatNumber(runs);
-    statWins.textContent = formatNumber(wins);
-    statWinRate.textContent = formatPercent(winRate);
+    const avgRelics =
+        weightedAverage(
+            rows,
+            "avg_relics",
+            "runs"
+        );
+
+
+    statRuns.textContent =
+        formatNumber(runs);
+
+    statWins.textContent =
+        formatNumber(wins);
+
+    statWinRate.textContent =
+        formatPercent(winRate);
 
     statAvgFloor.textContent =
         formatDecimal(avgFloor);
@@ -285,13 +542,21 @@ function renderOverview(rows, selectedVersions) {
     statAvgRelics.textContent =
         formatDecimal(avgRelics);
 
+
     const versionText =
         selectedVersions.length === 1
             ? "1 version"
             : `${selectedVersions.length} versions`;
 
+
+    const modText =
+        includeForeignMods?.checked
+            ? " · other mods included"
+            : "";
+
+
     filterRunCount.textContent =
-        `${formatNumber(runs)} runs across ${versionText}`;
+        `${formatNumber(runs)} runs across ${versionText}${modText}`;
 }
 
 
@@ -301,149 +566,227 @@ function renderOverview(rows, selectedVersions) {
 
 function renderAscensions(rows) {
 
-    const grouped = new Map();
+    const grouped =
+        new Map();
+
 
     for (const row of rows) {
 
-        const ascension = Number(row.ascension);
+        const ascension =
+            Number(row.ascension);
 
-        if (!grouped.has(ascension)) {
-            grouped.set(ascension, {
-                ascension: ascension,
-                runs: 0,
-                wins: 0
-            });
+
+        if (
+            !grouped.has(ascension)
+        ) {
+
+            grouped.set(
+                ascension,
+                {
+                    ascension,
+                    runs: 0,
+                    wins: 0
+                }
+            );
         }
 
-        const item = grouped.get(ascension);
 
-        item.runs += Number(row.runs ?? 0);
-        item.wins += Number(row.wins ?? 0);
+        const item =
+            grouped.get(ascension);
+
+
+        item.runs +=
+            Number(
+                row.runs ?? 0
+            );
+
+        item.wins +=
+            Number(
+                row.wins ?? 0
+            );
     }
 
-    const results = [...grouped.values()]
-        .sort((a, b) =>
-            a.ascension - b.ascension
+
+    const results =
+        [...grouped.values()]
+            .sort(
+                (a, b) =>
+                    a.ascension -
+                    b.ascension
+            );
+
+
+    const labels =
+        results.map(
+            item =>
+                `A${item.ascension}`
         );
 
-    const labels = results.map(
-        item => `A${item.ascension}`
-    );
 
-    const winRates = results.map(
-        item =>
-            item.runs > 0
-                ? item.wins / item.runs * 100
-                : 0
-    );
-
-    const runCounts = results.map(
-        item => item.runs
-    );
+    const winRates =
+        results.map(
+            item =>
+                item.runs > 0
+                    ? item.wins /
+                    item.runs *
+                    100
+                    : 0
+        );
 
 
-    // Destroy old chart before making a new one.
-    // Necessary when changing the version range.
+    const runCounts =
+        results.map(
+            item => item.runs
+        );
+
+
     if (ascensionChart) {
         ascensionChart.destroy();
     }
 
 
-    ascensionChart = new Chart(
-        ascensionChartCanvas,
-        {
-            type: "bar",
+    const textMuted =
+        cssVariable(
+            "--text-muted",
+            "#aaaaaa"
+        );
 
-            data: {
-                labels: labels,
+    const border =
+        cssVariable(
+            "--border",
+            "#333333"
+        );
 
-                datasets: [
-                    {
-                        label: "Win Rate",
-                        data: winRates,
+    const borderFocus =
+        cssVariable(
+            "--border-focus",
+            "#888888"
+        );
 
-                        backgroundColor:
-                            "rgba(140, 140, 140, 0.8)",
 
-                        borderColor:
-                            "rgba(180, 180, 180, 1)",
+    ascensionChart =
+        new Chart(
+            ascensionChartCanvas,
+            {
+                type: "bar",
 
-                        borderWidth: 1,
+                data: {
+                    labels,
 
-                        borderRadius: 4
-                    }
-                ]
-            },
+                    datasets: [
+                        {
+                            label:
+                                "Win Rate",
 
-            options: {
+                            data:
+                            winRates,
 
-                responsive: true,
-                maintainAspectRatio: false,
+                            backgroundColor:
+                            borderFocus,
 
-                plugins: {
+                            borderColor:
+                            borderFocus,
 
-                    legend: {
-                        display: false
-                    },
+                            borderWidth: 1,
 
-                    tooltip: {
-
-                        callbacks: {
-
-                            label: function(context) {
-
-                                const index =
-                                    context.dataIndex;
-
-                                return [
-                                    `Win Rate: ${context.raw.toFixed(1)}%`,
-                                    `Runs: ${runCounts[index]}`
-                                ];
-                            }
+                            borderRadius: 4
                         }
-                    }
+                    ]
                 },
 
-                scales: {
+                options: {
 
-                    x: {
+                    responsive: true,
 
-                        grid: {
+                    maintainAspectRatio:
+                        false,
+
+                    plugins: {
+
+                        legend: {
                             display: false
                         },
 
-                        ticks: {
-                            color: "#aaa"
+                        tooltip: {
+
+                            callbacks: {
+
+                                label(
+                                    context
+                                ) {
+
+                                    const index =
+                                        context
+                                            .dataIndex;
+
+                                    return [
+                                        `Win Rate: ${context.raw.toFixed(1)}%`,
+                                        `Runs: ${formatNumber(runCounts[index])}`
+                                    ];
+                                }
+                            }
                         }
                     },
 
-                    y: {
+                    scales: {
 
-                        beginAtZero: true,
-                        max: 100,
+                        x: {
 
-                        ticks: {
-                            color: "#aaa",
+                            grid: {
+                                display:
+                                    false
+                            },
 
-                            callback: function(value) {
-                                return value + "%";
+                            ticks: {
+                                color:
+                                textMuted
                             }
                         },
 
-                        grid: {
-                            color: "#333"
-                        },
+                        y: {
 
-                        title: {
-                            display: true,
-                            text: "Win Rate",
-                            color: "#aaa"
+                            beginAtZero:
+                                true,
+
+                            max:
+                                100,
+
+                            ticks: {
+
+                                color:
+                                textMuted,
+
+                                callback(
+                                    value
+                                ) {
+                                    return (
+                                        value +
+                                        "%"
+                                    );
+                                }
+                            },
+
+                            grid: {
+                                color:
+                                border
+                            },
+
+                            title: {
+
+                                display:
+                                    true,
+
+                                text:
+                                    "Win Rate",
+
+                                color:
+                                textMuted
+                            }
                         }
                     }
                 }
             }
-        }
-    );
+        );
 }
 
 
@@ -453,68 +796,120 @@ function renderAscensions(rows) {
 
 function renderEnemies(rows) {
 
-    const grouped = new Map();
+    const grouped =
+        new Map();
+
 
     for (const row of rows) {
 
-        const id = row.encounter;
+        const id =
+            row.encounter;
+
 
         if (!grouped.has(id)) {
 
-            grouped.set(id, {
-                encounter: id,
-                fights: 0,
-                deaths: 0,
-                survived: 0,
+            grouped.set(
+                id,
+                {
+                    encounter:
+                    id,
 
-                totalTurns: 0,
-                totalDamage: 0
-            });
+                    fights:
+                        0,
+
+                    deaths:
+                        0,
+
+                    survived:
+                        0,
+
+                    totalTurns:
+                        0,
+
+                    totalDamage:
+                        0
+                }
+            );
         }
 
-        const item = grouped.get(id);
+
+        const item =
+            grouped.get(id);
 
         const fights =
-            Number(row.fights ?? 0);
+            Number(
+                row.fights ?? 0
+            );
 
-        item.fights += fights;
-        item.deaths += Number(row.deaths ?? 0);
-        item.survived += Number(row.survived ?? 0);
+
+        item.fights +=
+            fights;
+
+        item.deaths +=
+            Number(
+                row.deaths ?? 0
+            );
+
+        item.survived +=
+            Number(
+                row.survived ?? 0
+            );
+
 
         item.totalTurns +=
-            Number(row.avg_turns ?? 0)
-            * fights;
+            Number(
+                row.avg_turns ?? 0
+            ) * fights;
 
         item.totalDamage +=
-            Number(row.avg_damage ?? 0)
-            * fights;
+            Number(
+                row.avg_damage ?? 0
+            ) * fights;
     }
 
-    const results = [...grouped.values()]
-        .sort((a, b) =>
-            b.fights - a.fights
-        );
 
-    enemyTableBody.innerHTML = "";
+    const results =
+        [...grouped.values()]
+            .sort(
+                (a, b) =>
+                    b.fights -
+                    a.fights
+            );
+
+
+    enemyTableBody.innerHTML =
+        "";
+
 
     for (const item of results) {
 
         const survivalRate =
             item.fights > 0
-                ? item.survived / item.fights * 100
+                ? item.survived /
+                item.fights *
+                100
                 : 0;
+
 
         const avgTurns =
             item.fights > 0
-                ? item.totalTurns / item.fights
+                ? item.totalTurns /
+                item.fights
                 : 0;
+
 
         const avgDamage =
             item.fights > 0
-                ? item.totalDamage / item.fights
+                ? item.totalDamage /
+                item.fights
                 : 0;
 
-        const row = document.createElement("tr");
+
+        const row =
+            document.createElement(
+                "tr"
+            );
+
 
         row.innerHTML = `
             <td>${cleanName(item.encounter)}</td>
@@ -525,7 +920,10 @@ function renderEnemies(rows) {
             <td>${formatDecimal(avgDamage)}</td>
         `;
 
-        enemyTableBody.appendChild(row);
+
+        enemyTableBody.appendChild(
+            row
+        );
     }
 }
 
@@ -536,108 +934,176 @@ function renderEnemies(rows) {
 
 function renderCards(rows) {
 
-    const grouped = new Map();
+    const grouped =
+        new Map();
+
 
     for (const row of rows) {
 
-        const id = row.card_id;
+        const id =
+            row.card_id;
+
 
         if (!grouped.has(id)) {
 
-            grouped.set(id, {
-                cardId: id,
+            grouped.set(
+                id,
+                {
+                    cardId:
+                    id,
 
-                offers: 0,
-                picks: 0,
+                    offers:
+                        0,
 
-                runs: 0,
-                copies: 0,
+                    picks:
+                        0,
 
-                weightedWins: 0
-            });
+                    runs:
+                        0,
+
+                    copies:
+                        0,
+
+                    wins:
+                        0
+                }
+            );
         }
 
-        const item = grouped.get(id);
 
-        const runs =
-            Number(row.runs_with_card ?? 0);
+        const item =
+            grouped.get(id);
+
 
         item.offers +=
-            Number(row.offers ?? 0);
+            Number(
+                row.offers ?? 0
+            );
+
 
         item.picks +=
-            Number(row.picks ?? 0);
+            Number(
+                row.picks ?? 0
+            );
 
-        item.runs += runs;
+
+        item.runs +=
+            Number(
+                row.runs_with_card ??
+                0
+            );
+
 
         item.copies +=
-            Number(row.total_copies ?? 0);
+            Number(
+                row.total_copies ??
+                0
+            );
 
-        // analytics_cards currently stores the
-        // per-version win rate rather than raw wins.
-        //
-        // This gives us a weighted cross-version rate.
-        item.weightedWins +=
-            runs
-            * Number(row.win_rate ?? 0)
-            / 100;
+
+        // Exact raw win count.
+        // No reconstruction from rounded %.
+
+        item.wins +=
+            Number(
+                row.wins_with_card ??
+                0
+            );
     }
 
-    const results = [...grouped.values()]
-        .sort((a, b) =>
-            b.offers - a.offers
-        );
 
-    cardTableBody.innerHTML = "";
+    const results =
+        [...grouped.values()]
+            .sort(
+                (a, b) =>
+                    b.offers -
+                    a.offers
+            );
+
+
+    cardTableBody.innerHTML =
+        "";
+
 
     for (const item of results) {
 
         const pickRate =
             item.offers > 0
-                ? item.picks / item.offers * 100
+                ? item.picks /
+                item.offers *
+                100
                 : null;
+
 
         const avgCopies =
             item.runs > 0
-                ? item.copies / item.runs
+                ? item.copies /
+                item.runs
                 : null;
+
 
         const winRate =
             item.runs > 0
-                ? item.weightedWins / item.runs * 100
+                ? item.wins /
+                item.runs *
+                100
                 : null;
 
-        const row = document.createElement("tr");
+
+        const row =
+            document.createElement(
+                "tr"
+            );
+
 
         row.innerHTML = `
             <td>${cleanName(item.cardId)}</td>
 
-            <td>${formatNumber(item.offers)}</td>
-
-            <td>${formatNumber(item.picks)}</td>
-
             <td>
-                ${pickRate === null
-            ? "-"
-            : formatPercent(pickRate)}
-            </td>
-
-            <td>${formatNumber(item.runs)}</td>
-
-            <td>
-                ${avgCopies === null
-            ? "-"
-            : avgCopies.toFixed(2)}
+                ${formatNumber(item.offers)}
             </td>
 
             <td>
-                ${winRate === null
-            ? "-"
-            : formatPercent(winRate)}
+                ${formatNumber(item.picks)}
+            </td>
+
+            <td>
+                ${
+            pickRate === null
+                ? "-"
+                : formatPercent(
+                    pickRate
+                )
+        }
+            </td>
+
+            <td>
+                ${formatNumber(item.runs)}
+            </td>
+
+            <td>
+                ${
+            avgCopies === null
+                ? "-"
+                : avgCopies.toFixed(2)
+        }
+            </td>
+
+            <td>
+                ${
+            winRate === null
+                ? "-"
+                : formatPercent(
+                    winRate
+                )
+        }
             </td>
         `;
 
-        cardTableBody.appendChild(row);
+
+        cardTableBody.appendChild(
+            row
+        );
     }
 }
 
@@ -648,49 +1114,81 @@ function renderCards(rows) {
 
 function renderRelics(rows) {
 
-    const grouped = new Map();
+    const grouped =
+        new Map();
+
 
     for (const row of rows) {
 
-        const id = row.relic_id;
+        const id =
+            row.relic_id;
+
 
         if (!grouped.has(id)) {
 
-            grouped.set(id, {
-                relicId: id,
-                runs: 0,
-                weightedWins: 0
-            });
+            grouped.set(
+                id,
+                {
+                    relicId:
+                    id,
+
+                    runs:
+                        0,
+
+                    wins:
+                        0
+                }
+            );
         }
 
-        const item = grouped.get(id);
 
-        const runs =
-            Number(row.runs_with_relic ?? 0);
+        const item =
+            grouped.get(id);
 
-        item.runs += runs;
 
-        item.weightedWins +=
-            runs
-            * Number(row.win_rate ?? 0)
-            / 100;
+        item.runs +=
+            Number(
+                row.runs_with_relic ??
+                0
+            );
+
+
+        item.wins +=
+            Number(
+                row.wins_with_relic ??
+                0
+            );
     }
 
-    const results = [...grouped.values()]
-        .sort((a, b) =>
-            b.runs - a.runs
-        );
 
-    relicTableBody.innerHTML = "";
+    const results =
+        [...grouped.values()]
+            .sort(
+                (a, b) =>
+                    b.runs -
+                    a.runs
+            );
+
+
+    relicTableBody.innerHTML =
+        "";
+
 
     for (const item of results) {
 
         const winRate =
             item.runs > 0
-                ? item.weightedWins / item.runs * 100
+                ? item.wins /
+                item.runs *
+                100
                 : 0;
 
-        const row = document.createElement("tr");
+
+        const row =
+            document.createElement(
+                "tr"
+            );
+
 
         row.innerHTML = `
             <td>${cleanName(item.relicId)}</td>
@@ -698,7 +1196,10 @@ function renderRelics(rows) {
             <td>${formatPercent(winRate)}</td>
         `;
 
-        relicTableBody.appendChild(row);
+
+        relicTableBody.appendChild(
+            row
+        );
     }
 }
 
@@ -707,11 +1208,17 @@ function renderRelics(rows) {
 // HELPERS
 // ============================================================
 
-function sum(rows, field) {
+function sum(
+    rows,
+    field
+) {
 
     return rows.reduce(
         (total, row) =>
-            total + Number(row[field] ?? 0),
+            total +
+            Number(
+                row[field] ?? 0
+            ),
         0
     );
 }
@@ -726,13 +1233,21 @@ function weightedAverage(
     let total = 0;
     let weight = 0;
 
+
     for (const row of rows) {
 
         const value =
-            Number(row[valueField]);
+            Number(
+                row[valueField]
+            );
+
 
         const rowWeight =
-            Number(row[weightField] ?? 0);
+            Number(
+                row[weightField] ??
+                0
+            );
+
 
         if (
             !Number.isFinite(value) ||
@@ -741,13 +1256,20 @@ function weightedAverage(
             continue;
         }
 
-        total += value * rowWeight;
-        weight += rowWeight;
+
+        total +=
+            value *
+            rowWeight;
+
+        weight +=
+            rowWeight;
     }
+
 
     if (weight === 0) {
         return null;
     }
+
 
     return total / weight;
 }
@@ -755,14 +1277,19 @@ function weightedAverage(
 
 function formatNumber(value) {
 
-    return Number(value ?? 0)
-        .toLocaleString();
+    return Number(
+        value ?? 0
+    ).toLocaleString();
 }
 
 
 function formatPercent(value) {
 
-    return `${Number(value ?? 0).toFixed(1)}%`;
+    return `${
+        Number(
+            value ?? 0
+        ).toFixed(1)
+    }%`;
 }
 
 
@@ -776,6 +1303,7 @@ function formatDecimal(value) {
         return "-";
     }
 
+
     return value.toFixed(1);
 }
 
@@ -786,14 +1314,41 @@ function cleanName(value) {
         return "-";
     }
 
+
     return value
-        .replace(/^THEENGINEER-/, "")
-        .replaceAll("_", " ")
+        .replace(
+            /^THEENGINEER-/,
+            ""
+        )
+        .replaceAll(
+            "_",
+            " "
+        )
         .toLowerCase()
-        .replace(/\b\w/g, letter =>
-            letter.toUpperCase()
+        .replace(
+            /\b\w/g,
+            letter =>
+                letter.toUpperCase()
         );
 }
+
+
+function cssVariable(
+    name,
+    fallback
+) {
+
+    const value =
+        getComputedStyle(
+            document.documentElement
+        )
+            .getPropertyValue(name)
+            .trim();
+
+
+    return value || fallback;
+}
+
 
 // ============================================================
 // SORTABLE TABLES
@@ -802,139 +1357,230 @@ function cleanName(value) {
 function enableTableSorting() {
 
     document
-        .querySelectorAll("table.sortable th[data-sort]")
-        .forEach(header => {
+        .querySelectorAll(
+            "table.sortable th[data-sort]"
+        )
+        .forEach(
+            header => {
 
-            header.addEventListener("click", () => {
+                header.addEventListener(
+                    "click",
+                    () => {
 
-                const table = header.closest("table");
-                const tbody = table.querySelector("tbody");
+                        const table =
+                            header.closest(
+                                "table"
+                            );
 
-                const headers = [
-                    ...table.querySelectorAll("th")
-                ];
-
-                const columnIndex =
-                    headers.indexOf(header);
-
-                const type =
-                    header.dataset.sort;
-
-                const currentDirection =
-                    header.dataset.direction;
-
-                const direction =
-                    currentDirection === "asc"
-                        ? "desc"
-                        : "asc";
+                        const tbody =
+                            table.querySelector(
+                                "tbody"
+                            );
 
 
-                // Reset the other headers.
-                headers.forEach(otherHeader => {
-
-                    if (otherHeader !== header) {
-                        delete otherHeader.dataset.direction;
-                    }
-                });
-
-                header.dataset.direction = direction;
+                        const headers = [
+                            ...table.querySelectorAll(
+                                "th"
+                            )
+                        ];
 
 
-                const rows = [
-                    ...tbody.querySelectorAll("tr")
-                ];
+                        const columnIndex =
+                            headers.indexOf(
+                                header
+                            );
 
 
-                rows.sort((a, b) => {
-
-                    const aText =
-                        a.children[columnIndex]
-                            ?.textContent
-                            ?.trim() ?? "";
-
-                    const bText =
-                        b.children[columnIndex]
-                            ?.textContent
-                            ?.trim() ?? "";
+                        const type =
+                            header.dataset
+                                .sort;
 
 
-                    if (type === "number") {
-
-                        const aValue =
-                            parseSortableNumber(aText);
-
-                        const bValue =
-                            parseSortableNumber(bText);
-
-                        const aMissing =
-                            Number.isNaN(aValue);
-
-                        const bMissing =
-                            Number.isNaN(bValue);
+                        const currentDirection =
+                            header.dataset
+                                .direction;
 
 
-                        // Missing values always go at the end,
-                        // regardless of ascending / descending sort.
-                        if (aMissing && bMissing) {
-                            return 0;
-                        }
-
-                        if (aMissing) {
-                            return 1;
-                        }
-
-                        if (bMissing) {
-                            return -1;
-                        }
+                        const direction =
+                            currentDirection ===
+                            "asc"
+                                ? "desc"
+                                : "asc";
 
 
-                        const comparison =
-                            aValue - bValue;
+                        headers.forEach(
+                            otherHeader => {
 
-                        return direction === "asc"
-                            ? comparison
-                            : -comparison;
-                    }
+                                if (
+                                    otherHeader !==
+                                    header
+                                ) {
 
-
-                    const comparison =
-                        aText.localeCompare(
-                            bText,
-                            undefined,
-                            {
-                                numeric: true,
-                                sensitivity: "base"
+                                    delete otherHeader
+                                        .dataset
+                                        .direction;
+                                }
                             }
                         );
 
-                    return direction === "asc"
-                        ? comparison
-                        : -comparison;
-                });
+
+                        header.dataset
+                            .direction =
+                            direction;
 
 
-                tbody.replaceChildren(...rows);
-            });
-        });
+                        const rows = [
+                            ...tbody.querySelectorAll(
+                                "tr"
+                            )
+                        ];
+
+
+                        rows.sort(
+                            (a, b) => {
+
+                                const aText =
+                                    a.children[
+                                        columnIndex
+                                        ]
+                                        ?.textContent
+                                        ?.trim() ??
+                                    "";
+
+
+                                const bText =
+                                    b.children[
+                                        columnIndex
+                                        ]
+                                        ?.textContent
+                                        ?.trim() ??
+                                    "";
+
+
+                                if (
+                                    type ===
+                                    "number"
+                                ) {
+
+                                    const aValue =
+                                        parseSortableNumber(
+                                            aText
+                                        );
+
+
+                                    const bValue =
+                                        parseSortableNumber(
+                                            bText
+                                        );
+
+
+                                    const aMissing =
+                                        Number.isNaN(
+                                            aValue
+                                        );
+
+
+                                    const bMissing =
+                                        Number.isNaN(
+                                            bValue
+                                        );
+
+
+                                    // Missing values always
+                                    // remain at the bottom.
+
+                                    if (
+                                        aMissing &&
+                                        bMissing
+                                    ) {
+                                        return 0;
+                                    }
+
+
+                                    if (aMissing) {
+                                        return 1;
+                                    }
+
+
+                                    if (bMissing) {
+                                        return -1;
+                                    }
+
+
+                                    const comparison =
+                                        aValue -
+                                        bValue;
+
+
+                                    return direction ===
+                                    "asc"
+                                        ? comparison
+                                        : -comparison;
+                                }
+
+
+                                const comparison =
+                                    aText.localeCompare(
+                                        bText,
+                                        undefined,
+                                        {
+                                            numeric:
+                                                true,
+
+                                            sensitivity:
+                                                "base"
+                                        }
+                                    );
+
+
+                                return direction ===
+                                "asc"
+                                    ? comparison
+                                    : -comparison;
+                            }
+                        );
+
+
+                        tbody.replaceChildren(
+                            ...rows
+                        );
+                    }
+                );
+            }
+        );
 }
 
 
-function parseSortableNumber(text) {
+function parseSortableNumber(
+    text
+) {
 
-    if (!text || text === "-") {
+    if (
+        !text ||
+        text === "-"
+    ) {
         return NaN;
     }
 
-    const cleaned = text
-        .replaceAll(",", "")
-        .replace("%", "")
-        .trim();
 
-    return Number.parseFloat(cleaned);
+    const cleaned =
+        text
+            .replaceAll(
+                ",",
+                ""
+            )
+            .replace(
+                "%",
+                ""
+            )
+            .trim();
+
+
+    return Number.parseFloat(
+        cleaned
+    );
 }
 
-
-enableTableSorting();
 
 // ============================================================
 // TABLE SEARCH
@@ -943,45 +1589,88 @@ enableTableSorting();
 function enableTableSearch() {
 
     document
-        .querySelectorAll(".table-search")
-        .forEach(input => {
+        .querySelectorAll(
+            ".table-search"
+        )
+        .forEach(
+            input => {
 
-            input.addEventListener("input", () => {
-
-                const tableId =
-                    input.dataset.table;
-
-                const table =
-                    document.getElementById(tableId);
-
-                if (!table) {
-                    return;
-                }
-
-                const query =
-                    input.value
-                        .trim()
-                        .toLowerCase();
-
-                const rows =
-                    table.querySelectorAll("tbody tr");
-
-                rows.forEach(row => {
-
-                    const text =
-                        row.textContent
-                            .toLowerCase();
-
-                    const matches =
-                        text.includes(query);
-
-                    row.style.display =
-                        matches
-                            ? ""
-                            : "none";
-                });
-            });
-        });
+                input.addEventListener(
+                    "input",
+                    () =>
+                        applyTableSearch(
+                            input
+                        )
+                );
+            }
+        );
 }
 
-enableTableSearch();
+
+function applyTableSearch(
+    input
+) {
+
+    const tableId =
+        input.dataset.table;
+
+
+    const table =
+        document.getElementById(
+            tableId
+        );
+
+
+    if (!table) {
+        return;
+    }
+
+
+    const query =
+        input.value
+            .trim()
+            .toLowerCase();
+
+
+    const rows =
+        table.querySelectorAll(
+            "tbody tr"
+        );
+
+
+    rows.forEach(
+        row => {
+
+            const text =
+                row.textContent
+                    .toLowerCase();
+
+
+            const matches =
+                text.includes(
+                    query
+                );
+
+
+            row.style.display =
+                matches
+                    ? ""
+                    : "none";
+        }
+    );
+}
+
+
+function applyAllTableSearches() {
+
+    document
+        .querySelectorAll(
+            ".table-search"
+        )
+        .forEach(
+            input =>
+                applyTableSearch(
+                    input
+                )
+        );
+}
