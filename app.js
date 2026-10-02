@@ -2,46 +2,61 @@
 // CONFIG
 // ============================================================
 
-const SUPABASE_URL = "https://ncinltapmqboudktjgae.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_6JpE7BTrVJUvdlp6jaeZzg_xAfM2Qtr";
+const SUPABASE_URL =
+    "https://ncinltapmqboudktjgae.supabase.co";
 
-const db = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
-);
+const SUPABASE_ANON_KEY =
+    "sb_publishable_6JpE7BTrVJUvdlp6jaeZzg_xAfM2Qtr";
+
+const DEFAULT_FROM_VERSION =
+    "1.0.0";
+
+const ROLLING_WINDOW =
+    20;
+
+const db =
+    supabase.createClient(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY
+    );
 
 
 // ============================================================
-// ELEMENTS
+// PAGE
 // ============================================================
 
-const versionFrom = document.getElementById("versionFrom");
-const versionTo = document.getElementById("versionTo");
-const filterRunCount = document.getElementById("filterRunCount");
+const page =
+    document.body.dataset.page;
+
+
+// ============================================================
+// COMMON ELEMENTS
+// ============================================================
+
+const versionFrom =
+    document.getElementById(
+        "versionFrom"
+    );
+
+const versionTo =
+    document.getElementById(
+        "versionTo"
+    );
+
+const filterRunCount =
+    document.getElementById(
+        "filterRunCount"
+    );
 
 const includeForeignMods =
-    document.getElementById("includeForeignMods");
+    document.getElementById(
+        "includeForeignMods"
+    );
 
-const statRuns = document.getElementById("statRuns");
-const statWins = document.getElementById("statWins");
-const statWinRate = document.getElementById("statWinRate");
-const statAvgFloor = document.getElementById("statAvgFloor");
-const statAvgDeck = document.getElementById("statAvgDeck");
-const statAvgRelics = document.getElementById("statAvgRelics");
-
-const ascensionChartCanvas =
-    document.getElementById("ascensionChart");
-
-const enemyTableBody =
-    document.getElementById("enemyTableBody");
-
-const cardTableBody =
-    document.getElementById("cardTableBody");
-
-const relicTableBody =
-    document.getElementById("relicTableBody");
-
-let ascensionChart = null;
+const reloadButton =
+    document.getElementById(
+        "reloadButton"
+    );
 
 
 // ============================================================
@@ -50,38 +65,45 @@ let ascensionChart = null;
 
 let versions = [];
 
+let ascensionChart = null;
+let winRateTimelineChart = null;
+
+let recentRuns = [];
+let visibleRunCount = 5;
+
+let cardData = [];
+let cardMatchups = [];
+
 
 // ============================================================
-// INITIALIZATION
+// INIT
 // ============================================================
 
 async function init() {
+
     try {
+
         await loadVersions();
 
-        versionFrom.addEventListener(
-            "change",
-            refreshDashboard
-        );
+        bindCommonEvents();
 
-        versionTo.addEventListener(
-            "change",
-            refreshDashboard
-        );
-
-        if (includeForeignMods) {
-            includeForeignMods.addEventListener(
-                "change",
-                refreshDashboard
-            );
+        if (page === "overview") {
+            bindOverviewEvents();
         }
 
-        enableTableSorting();
-        enableTableSearch();
+        if (page === "cards") {
+            bindCardEvents();
+        }
 
-        await refreshDashboard();
+        if (page === "enemies") {
+            enableTableSorting();
+            enableTableSearch();
+        }
+
+        await refreshCurrentPage();
     }
     catch (error) {
+
         console.error(error);
 
         alert(
@@ -94,87 +116,257 @@ init();
 
 
 // ============================================================
+// EVENTS
+// ============================================================
+
+function bindCommonEvents() {
+
+    versionFrom.addEventListener(
+        "change",
+        refreshCurrentPage
+    );
+
+    versionTo.addEventListener(
+        "change",
+        refreshCurrentPage
+    );
+
+    includeForeignMods
+        ?.addEventListener(
+            "change",
+            refreshCurrentPage
+        );
+
+    reloadButton
+        ?.addEventListener(
+            "click",
+            reloadAll
+        );
+}
+
+
+function bindOverviewEvents() {
+
+    enableTableSorting();
+    enableTableSearch();
+
+    document
+        .getElementById(
+            "showMoreRuns"
+        )
+        ?.addEventListener(
+            "click",
+            () => {
+
+                visibleRunCount += 10;
+
+                renderRecentRuns();
+            }
+        );
+}
+
+
+function bindCardEvents() {
+
+    document
+        .getElementById(
+            "cardSearch"
+        )
+        ?.addEventListener(
+            "input",
+            renderCards
+        );
+
+
+    document
+        .getElementById(
+            "cardSortBy"
+        )
+        ?.addEventListener(
+            "change",
+            renderCards
+        );
+
+
+    document
+        .getElementById(
+            "cardSortDirection"
+        )
+        ?.addEventListener(
+            "change",
+            renderCards
+        );
+
+
+    document
+        .getElementById(
+            "engineerCardsOnly"
+        )
+        ?.addEventListener(
+            "change",
+            renderCards
+        );
+}
+
+
+// ============================================================
+// RELOAD
+// ============================================================
+
+async function reloadAll() {
+
+    if (!reloadButton) {
+        return;
+    }
+
+    const oldFrom =
+        versionFrom.value;
+
+    const oldTo =
+        versionTo.value;
+
+
+    reloadButton.disabled =
+        true;
+
+    reloadButton.textContent =
+        "↻ Loading...";
+
+
+    try {
+
+        await loadVersions(
+            oldFrom,
+            oldTo
+        );
+
+        await refreshCurrentPage();
+    }
+    finally {
+
+        reloadButton.disabled =
+            false;
+
+        reloadButton.textContent =
+            "↻ Reload";
+    }
+}
+
+
+// ============================================================
 // VERSION HANDLING
 // ============================================================
 
-async function loadVersions() {
+async function loadVersions(
+    preserveFrom = null,
+    preserveTo = null
+) {
 
-    const { data, error } = await db
-        .from("analytics_overview")
+    const {
+        data,
+        error
+    } = await db
+        .from(
+            "analytics_overview"
+        )
         .select(
-            "mod_version,latest_run,has_foreign_content"
+            "mod_version,latest_run"
         );
+
 
     if (error) {
         throw error;
     }
 
 
-    // analytics_overview can now contain two rows per version:
-    //
-    // 1. has_foreign_content = false
-    // 2. has_foreign_content = true
-    //
-    // Collapse those back into one version entry.
+    const versionMap =
+        new Map();
 
-    const versionMap = new Map();
 
     for (const row of data) {
 
-        const version = row.mod_version;
+        const version =
+            row.mod_version;
+
 
         if (
             !version ||
-            version.toUpperCase() === "TEST"
+            version
+                .toUpperCase() ===
+            "TEST"
         ) {
             continue;
         }
 
-        const existing =
-            versionMap.get(version);
 
-        if (!existing) {
+        if (
+            !versionMap.has(
+                version
+            )
+        ) {
 
-            versionMap.set(version, {
-                mod_version: version,
-                latest_run: row.latest_run
-            });
+            versionMap.set(
+                version,
+                {
+                    mod_version:
+                    version,
+
+                    latest_run:
+                    row.latest_run
+                }
+            );
 
             continue;
         }
 
 
-        const existingDate =
-            new Date(existing.latest_run);
+        const current =
+            versionMap.get(
+                version
+            );
 
-        const newDate =
-            new Date(row.latest_run);
 
-        if (newDate > existingDate) {
-            existing.latest_run =
+        if (
+            new Date(
+                row.latest_run
+            ) >
+            new Date(
+                current.latest_run
+            )
+        ) {
+
+            current.latest_run =
                 row.latest_run;
         }
     }
 
 
-    versions = [...versionMap.values()]
-        .sort(
-            (a, b) =>
-                compareVersions(
-                    a.mod_version,
-                    b.mod_version
-                )
-        );
+    versions =
+        [...versionMap.values()]
+            .sort(
+                (a, b) =>
+                    compareVersions(
+                        a.mod_version,
+                        b.mod_version
+                    )
+            );
 
 
-    versionFrom.innerHTML = "";
-    versionTo.innerHTML = "";
+    versionFrom.innerHTML =
+        "";
+
+    versionTo.innerHTML =
+        "";
 
 
-    for (const row of versions) {
+    for (
+        const row of versions
+        ) {
 
         const fromOption =
-            document.createElement("option");
+            document.createElement(
+                "option"
+            );
 
         fromOption.value =
             row.mod_version;
@@ -184,7 +376,9 @@ async function loadVersions() {
 
 
         const toOption =
-            document.createElement("option");
+            document.createElement(
+                "option"
+            );
 
         toOption.value =
             row.mod_version;
@@ -203,23 +397,60 @@ async function loadVersions() {
     }
 
 
-    if (versions.length > 0) {
+    if (
+        versions.length === 0
+    ) {
+        return;
+    }
 
-        const defaultFromVersion = "1.0.0";
 
-        const hasDefaultVersion =
-            versions.some(
-                v =>
-                    v.mod_version ===
-                    defaultFromVersion
-            );
+    const availableVersions =
+        new Set(
+            versions.map(
+                value =>
+                    value.mod_version
+            )
+        );
 
+
+    if (
+        preserveFrom &&
+        availableVersions.has(
+            preserveFrom
+        )
+    ) {
 
         versionFrom.value =
-            hasDefaultVersion
-                ? defaultFromVersion
-                : versions[0].mod_version;
+            preserveFrom;
+    }
+    else if (
+        availableVersions.has(
+            DEFAULT_FROM_VERSION
+        )
+    ) {
 
+        versionFrom.value =
+            DEFAULT_FROM_VERSION;
+    }
+    else {
+
+        versionFrom.value =
+            versions[0]
+                .mod_version;
+    }
+
+
+    if (
+        preserveTo &&
+        availableVersions.has(
+            preserveTo
+        )
+    ) {
+
+        versionTo.value =
+            preserveTo;
+    }
+    else {
 
         versionTo.value =
             versions[
@@ -229,13 +460,21 @@ async function loadVersions() {
 }
 
 
-function compareVersions(a, b) {
+function compareVersions(
+    a,
+    b
+) {
 
     const aParts =
-        a.split(".").map(Number);
+        a
+            .split(".")
+            .map(Number);
 
     const bParts =
-        b.split(".").map(Number);
+        b
+            .split(".")
+            .map(Number);
+
 
     const length =
         Math.max(
@@ -271,15 +510,15 @@ function getSelectedVersions() {
 
     const fromIndex =
         versions.findIndex(
-            v =>
-                v.mod_version ===
+            value =>
+                value.mod_version ===
                 versionFrom.value
         );
 
     const toIndex =
         versions.findIndex(
-            v =>
-                v.mod_version ===
+            value =>
+                value.mod_version ===
                 versionTo.value
         );
 
@@ -311,56 +550,261 @@ function getSelectedVersions() {
             end + 1
         )
         .map(
-            v => v.mod_version
+            value =>
+                value.mod_version
         );
 }
 
 
 // ============================================================
-// ANALYTICS QUERY
+// QUERIES
 // ============================================================
 
-function analyticsQuery(
+const ANALYTICS_PAGE_SIZE = 1000;
+
+
+// Stable ordering is important when using range pagination.
+const ANALYTICS_ORDER_COLUMNS = {
+
+    analytics_overview: [
+        "mod_version",
+        "has_foreign_content"
+    ],
+
+    analytics_ascensions: [
+        "mod_version",
+        "has_foreign_content",
+        "ascension"
+    ],
+
+    analytics_enemies: [
+        "mod_version",
+        "has_foreign_content",
+        "encounter"
+    ],
+
+    analytics_cards: [
+        "mod_version",
+        "has_foreign_content",
+        "card_id"
+    ],
+
+    analytics_relics: [
+        "mod_version",
+        "has_foreign_content",
+        "relic_id"
+    ],
+
+    analytics_card_matchups: [
+        "mod_version",
+        "has_foreign_content",
+        "picked_card_id",
+        "skipped_card_id"
+    ]
+};
+
+
+async function analyticsQuery(
     viewName,
     selectedVersions
 ) {
 
-    let query = db
-        .from(viewName)
-        .select("*")
-        .in(
-            "mod_version",
-            selectedVersions
+    const allRows = [];
+
+    let from = 0;
+
+
+    while (true) {
+
+        let query = db
+            .from(viewName)
+            .select("*")
+            .in(
+                "mod_version",
+                selectedVersions
+            );
+
+
+        if (
+            !includeForeignMods
+                ?.checked
+        ) {
+
+            query = query.eq(
+                "has_foreign_content",
+                false
+            );
+        }
+
+
+        const orderColumns =
+            ANALYTICS_ORDER_COLUMNS[
+                viewName
+                ] ?? [];
+
+
+        for (
+            const column
+            of orderColumns
+            ) {
+
+            query = query.order(
+                column,
+                {
+                    ascending: true
+                }
+            );
+        }
+
+
+        query = query.range(
+            from,
+            from
+            + ANALYTICS_PAGE_SIZE
+            - 1
         );
 
 
-    // Toggle off:
-    // only clean Engineer runs.
-    //
-    // Toggle on:
-    // both clean + runs containing other mods.
+        const {
+            data,
+            error
+        } = await query;
 
-    if (
-        !includeForeignMods ||
-        !includeForeignMods.checked
-    ) {
 
-        query = query.eq(
-            "has_foreign_content",
-            false
+        if (error) {
+
+            return {
+                data: null,
+                error
+            };
+        }
+
+
+        allRows.push(
+            ...(data ?? [])
         );
+
+
+        if (
+            !data ||
+            data.length <
+            ANALYTICS_PAGE_SIZE
+        ) {
+            break;
+        }
+
+
+        from +=
+            ANALYTICS_PAGE_SIZE;
     }
 
 
-    return query;
+    return {
+        data: allRows,
+        error: null
+    };
+}
+
+
+async function publicRunsQuery(
+    selectedVersions
+) {
+
+    const pageSize = 1000;
+
+    const allRows = [];
+
+    let from = 0;
+
+
+    while (true) {
+
+        let query = db
+            .from(
+                "analytics_runs_public"
+            )
+            .select("*")
+            .in(
+                "mod_version",
+                selectedVersions
+            )
+            .order(
+                "received_at",
+                {
+                    ascending: false
+                }
+            )
+            .order(
+                "id",
+                {
+                    ascending: true
+                }
+            )
+            .range(
+                from,
+                from
+                + pageSize
+                - 1
+            );
+
+
+        if (
+            !includeForeignMods
+                ?.checked
+        ) {
+
+            query = query.eq(
+                "has_foreign_content",
+                false
+            );
+        }
+
+
+        const {
+            data,
+            error
+        } = await query;
+
+
+        if (error) {
+
+            return {
+                data: null,
+                error
+            };
+        }
+
+
+        allRows.push(
+            ...(data ?? [])
+        );
+
+
+        if (
+            !data ||
+            data.length <
+            pageSize
+        ) {
+            break;
+        }
+
+
+        from += pageSize;
+    }
+
+
+    return {
+        data: allRows,
+        error: null
+    };
 }
 
 
 // ============================================================
-// REFRESH EVERYTHING
+// PAGE REFRESH
 // ============================================================
 
-async function refreshDashboard() {
+async function refreshCurrentPage() {
 
     const selectedVersions =
         getSelectedVersions();
@@ -377,111 +821,262 @@ async function refreshDashboard() {
         "Loading...";
 
 
-    try {
+    if (page === "overview") {
 
-        const [
-            overviewResult,
-            ascensionResult,
-            enemyResult,
-            cardResult,
-            relicResult
-        ] = await Promise.all([
-
-            analyticsQuery(
-                "analytics_overview",
-                selectedVersions
-            ),
-
-            analyticsQuery(
-                "analytics_ascensions",
-                selectedVersions
-            ),
-
-            analyticsQuery(
-                "analytics_enemies",
-                selectedVersions
-            ),
-
-            analyticsQuery(
-                "analytics_cards",
-                selectedVersions
-            ),
-
-            analyticsQuery(
-                "analytics_relics",
-                selectedVersions
-            )
-        ]);
-
-
-        checkError(
-            overviewResult
-        );
-
-        checkError(
-            ascensionResult
-        );
-
-        checkError(
-            enemyResult
-        );
-
-        checkError(
-            cardResult
-        );
-
-        checkError(
-            relicResult
-        );
-
-
-        renderOverview(
-            overviewResult.data,
+        await refreshOverview(
             selectedVersions
         );
-
-        renderAscensions(
-            ascensionResult.data
-        );
-
-        renderEnemies(
-            enemyResult.data
-        );
-
-        renderCards(
-            cardResult.data
-        );
-
-        renderRelics(
-            relicResult.data
-        );
-
-
-        // Reapply any active search after
-        // rebuilding table rows.
-
-        applyAllTableSearches();
     }
-    catch (error) {
 
-        console.error(error);
+    if (page === "cards") {
 
-        filterRunCount.textContent =
-            "Failed to load data";
+        await refreshCardPage(
+            selectedVersions
+        );
     }
-}
 
+    if (page === "enemies") {
 
-function checkError(result) {
-
-    if (result.error) {
-        throw result.error;
+        await refreshEnemyPage(
+            selectedVersions
+        );
     }
 }
 
 
 // ============================================================
-// OVERVIEW
+// OVERVIEW PAGE
+// ============================================================
+
+async function refreshOverview(
+    selectedVersions
+) {
+
+    visibleRunCount = 5;
+
+
+    const [
+        overviewResult,
+        ascensionResult,
+        relicResult,
+        runsResult
+    ] = await Promise.all([
+
+        analyticsQuery(
+            "analytics_overview",
+            selectedVersions
+        ),
+
+        analyticsQuery(
+            "analytics_ascensions",
+            selectedVersions
+        ),
+
+        analyticsQuery(
+            "analytics_relics",
+            selectedVersions
+        ),
+
+        publicRunsQuery(
+            selectedVersions
+        )
+    ]);
+
+
+    checkError(
+        overviewResult
+    );
+
+    checkError(
+        ascensionResult
+    );
+
+    checkError(
+        relicResult
+    );
+
+    checkError(
+        runsResult
+    );
+
+
+    renderOverview(
+        overviewResult.data,
+        selectedVersions
+    );
+
+    renderAscensions(
+        ascensionResult.data
+    );
+
+    renderRelics(
+        relicResult.data
+    );
+
+
+    recentRuns =
+        runsResult.data ?? [];
+
+
+    renderWinRateTimeline(
+        recentRuns
+    );
+
+    renderRecentRuns();
+
+    applyAllTableSearches();
+}
+
+
+// ============================================================
+// CARD PAGE
+// ============================================================
+
+async function refreshCardPage(
+    selectedVersions
+) {
+
+    const [
+        overviewResult,
+        cardsResult,
+        matchupsResult
+    ] = await Promise.all([
+
+        analyticsQuery(
+            "analytics_overview",
+            selectedVersions
+        ),
+
+        analyticsQuery(
+            "analytics_cards",
+            selectedVersions
+        ),
+
+        analyticsQuery(
+            "analytics_card_matchups",
+            selectedVersions
+        )
+    ]);
+
+
+    checkError(
+        overviewResult
+    );
+
+    checkError(
+        cardsResult
+    );
+
+    checkError(
+        matchupsResult
+    );
+
+
+    renderFilterSummary(
+        overviewResult.data,
+        selectedVersions
+    );
+
+
+    cardData =
+        aggregateCards(
+            cardsResult.data
+        );
+
+
+    cardMatchups =
+        aggregateCardMatchups(
+            matchupsResult.data
+        );
+
+
+    renderCards();
+}
+
+
+// ============================================================
+// ENEMY PAGE
+// ============================================================
+
+async function refreshEnemyPage(
+    selectedVersions
+) {
+
+    const [
+        overviewResult,
+        enemyResult
+    ] = await Promise.all([
+
+        analyticsQuery(
+            "analytics_overview",
+            selectedVersions
+        ),
+
+        analyticsQuery(
+            "analytics_enemies",
+            selectedVersions
+        )
+    ]);
+
+
+    checkError(
+        overviewResult
+    );
+
+    checkError(
+        enemyResult
+    );
+
+
+    renderFilterSummary(
+        overviewResult.data,
+        selectedVersions
+    );
+
+
+    renderEnemies(
+        enemyResult.data
+    );
+
+    applyAllTableSearches();
+}
+
+
+// ============================================================
+// FILTER SUMMARY
+// ============================================================
+
+function renderFilterSummary(
+    rows,
+    selectedVersions
+) {
+
+    const runs =
+        sum(
+            rows,
+            "runs"
+        );
+
+
+    const versionText =
+        selectedVersions.length === 1
+            ? "1 version"
+            : `${selectedVersions.length} versions`;
+
+
+    const modText =
+        includeForeignMods?.checked
+            ? " · other mods included"
+            : "";
+
+
+    filterRunCount.textContent =
+        `${formatNumber(runs)} runs across ${versionText}${modText}`;
+}
+
+
+// ============================================================
+// OVERVIEW STATS
 // ============================================================
 
 function renderOverview(
@@ -490,10 +1085,16 @@ function renderOverview(
 ) {
 
     const runs =
-        sum(rows, "runs");
+        sum(
+            rows,
+            "runs"
+        );
 
     const wins =
-        sum(rows, "wins");
+        sum(
+            rows,
+            "wins"
+        );
 
 
     const winRate =
@@ -524,47 +1125,80 @@ function renderOverview(
         );
 
 
-    statRuns.textContent =
-        formatNumber(runs);
-
-    statWins.textContent =
-        formatNumber(wins);
-
-    statWinRate.textContent =
-        formatPercent(winRate);
-
-    statAvgFloor.textContent =
-        formatDecimal(avgFloor);
-
-    statAvgDeck.textContent =
-        formatDecimal(avgDeck);
-
-    statAvgRelics.textContent =
-        formatDecimal(avgRelics);
+    document
+        .getElementById(
+            "statRuns"
+        )
+        .textContent =
+        formatNumber(
+            runs
+        );
 
 
-    const versionText =
-        selectedVersions.length === 1
-            ? "1 version"
-            : `${selectedVersions.length} versions`;
+    document
+        .getElementById(
+            "statWins"
+        )
+        .textContent =
+        formatNumber(
+            wins
+        );
 
 
-    const modText =
-        includeForeignMods?.checked
-            ? " · other mods included"
-            : "";
+    document
+        .getElementById(
+            "statWinRate"
+        )
+        .textContent =
+        formatPercent(
+            winRate
+        );
 
 
-    filterRunCount.textContent =
-        `${formatNumber(runs)} runs across ${versionText}${modText}`;
+    document
+        .getElementById(
+            "statAvgFloor"
+        )
+        .textContent =
+        formatDecimal(
+            avgFloor
+        );
+
+
+    document
+        .getElementById(
+            "statAvgDeck"
+        )
+        .textContent =
+        formatDecimal(
+            avgDeck
+        );
+
+
+    document
+        .getElementById(
+            "statAvgRelics"
+        )
+        .textContent =
+        formatDecimal(
+            avgRelics
+        );
+
+
+    renderFilterSummary(
+        rows,
+        selectedVersions
+    );
 }
 
 
 // ============================================================
-// ASCENSIONS
+// ASCENSION GRAPH
 // ============================================================
 
-function renderAscensions(rows) {
+function renderAscensions(
+    rows
+) {
 
     const grouped =
         new Map();
@@ -573,11 +1207,15 @@ function renderAscensions(rows) {
     for (const row of rows) {
 
         const ascension =
-            Number(row.ascension);
+            Number(
+                row.ascension
+            );
 
 
         if (
-            !grouped.has(ascension)
+            !grouped.has(
+                ascension
+            )
         ) {
 
             grouped.set(
@@ -592,7 +1230,9 @@ function renderAscensions(rows) {
 
 
         const item =
-            grouped.get(ascension);
+            grouped.get(
+                ascension
+            );
 
 
         item.runs +=
@@ -618,17 +1258,17 @@ function renderAscensions(rows) {
 
     const labels =
         results.map(
-            item =>
-                `A${item.ascension}`
+            value =>
+                `A${value.ascension}`
         );
 
 
     const winRates =
         results.map(
-            item =>
-                item.runs > 0
-                    ? item.wins /
-                    item.runs *
+            value =>
+                value.runs > 0
+                    ? value.wins /
+                    value.runs *
                     100
                     : 0
         );
@@ -636,7 +1276,8 @@ function renderAscensions(rows) {
 
     const runCounts =
         results.map(
-            item => item.runs
+            value =>
+                value.runs
         );
 
 
@@ -645,28 +1286,15 @@ function renderAscensions(rows) {
     }
 
 
-    const textMuted =
-        cssVariable(
-            "--text-muted",
-            "#aaaaaa"
-        );
-
-    const border =
-        cssVariable(
-            "--border",
-            "#333333"
-        );
-
-    const borderFocus =
-        cssVariable(
-            "--border-focus",
-            "#888888"
+    const canvas =
+        document.getElementById(
+            "ascensionChart"
         );
 
 
     ascensionChart =
         new Chart(
-            ascensionChartCanvas,
+            canvas,
             {
                 type: "bar",
 
@@ -675,28 +1303,24 @@ function renderAscensions(rows) {
 
                     datasets: [
                         {
-                            label:
-                                "Win Rate",
-
                             data:
                             winRates,
 
                             backgroundColor:
-                            borderFocus,
+                                cssVariable(
+                                    "--accent"
+                                ),
 
-                            borderColor:
-                            borderFocus,
-
-                            borderWidth: 1,
-
-                            borderRadius: 4
+                            borderRadius:
+                                4
                         }
                     ]
                 },
 
                 options: {
 
-                    responsive: true,
+                    responsive:
+                        true,
 
                     maintainAspectRatio:
                         false,
@@ -704,7 +1328,8 @@ function renderAscensions(rows) {
                     plugins: {
 
                         legend: {
-                            display: false
+                            display:
+                                false
                         },
 
                         tooltip: {
@@ -730,18 +1355,267 @@ function renderAscensions(rows) {
 
                     scales: {
 
+                        y: {
+
+                            beginAtZero:
+                                true,
+
+                            max:
+                                100,
+
+                            ticks: {
+
+                                color:
+                                    cssVariable(
+                                        "--text-muted"
+                                    ),
+
+                                callback(
+                                    value
+                                ) {
+
+                                    return (
+                                        value +
+                                        "%"
+                                    );
+                                }
+                            },
+
+                            grid: {
+
+                                color:
+                                    cssVariable(
+                                        "--border"
+                                    )
+                            }
+                        },
+
                         x: {
+
+                            ticks: {
+
+                                color:
+                                    cssVariable(
+                                        "--text-muted"
+                                    )
+                            },
 
                             grid: {
                                 display:
                                     false
-                            },
-
-                            ticks: {
-                                color:
-                                textMuted
                             }
+                        }
+                    }
+                }
+            }
+        );
+}
+
+
+// ============================================================
+// WIN RATE OVER TIME
+// ============================================================
+
+function renderWinRateTimeline(
+    rows
+) {
+
+    const canvas =
+        document.getElementById(
+            "winRateTimelineChart"
+        );
+
+
+    if (!canvas) {
+        return;
+    }
+
+
+    const ordered =
+        [...rows]
+            .sort(
+                (a, b) =>
+                    new Date(
+                        a.received_at
+                    ) -
+                    new Date(
+                        b.received_at
+                    )
+            );
+
+
+    const labels = [];
+    const values = [];
+
+
+    for (
+        let i = 0;
+        i < ordered.length;
+        i++
+    ) {
+
+        const start =
+            Math.max(
+                0,
+                i -
+                ROLLING_WINDOW +
+                1
+            );
+
+
+        const windowRuns =
+            ordered.slice(
+                start,
+                i + 1
+            );
+
+
+        const wins =
+            windowRuns.filter(
+                run =>
+                    run.win
+            ).length;
+
+
+        labels.push(
+            ordered[i]
+                .received_at
+        );
+
+
+        values.push(
+            windowRuns.length > 0
+                ? wins /
+                windowRuns.length *
+                100
+                : 0
+        );
+    }
+
+
+    const annotations =
+        buildPatchAnnotations(
+            ordered
+        );
+
+
+    if (
+        winRateTimelineChart
+    ) {
+
+        winRateTimelineChart
+            .destroy();
+    }
+
+
+    winRateTimelineChart =
+        new Chart(
+            canvas,
+            {
+                type:
+                    "line",
+
+                data: {
+
+                    labels,
+
+                    datasets: [
+                        {
+                            label:
+                                `${ROLLING_WINDOW}-run rolling win rate`,
+
+                            data:
+                            values,
+
+                            borderColor:
+                                cssVariable(
+                                    "--accent"
+                                ),
+
+                            backgroundColor:
+                                cssVariable(
+                                    "--accent"
+                                ),
+
+                            borderWidth:
+                                2,
+
+                            pointRadius:
+                                1,
+
+                            pointHoverRadius:
+                                4,
+
+                            tension:
+                                0.25
+                        }
+                    ]
+                },
+
+                options: {
+
+                    responsive:
+                        true,
+
+                    maintainAspectRatio:
+                        false,
+
+                    interaction: {
+                        intersect:
+                            false,
+
+                        mode:
+                            "index"
+                    },
+
+                    plugins: {
+
+                        legend: {
+                            display:
+                                false
                         },
+
+                        annotation: {
+                            annotations
+                        },
+
+                        tooltip: {
+
+                            callbacks: {
+
+                                title(
+                                    items
+                                ) {
+
+                                    if (
+                                        !items.length
+                                    ) {
+                                        return "";
+                                    }
+
+
+                                    return formatDateTime(
+                                        labels[
+                                            items[0]
+                                                .dataIndex
+                                            ]
+                                    );
+                                },
+
+                                label(
+                                    context
+                                ) {
+
+                                    return (
+                                        `Rolling Win Rate: ` +
+                                        `${context.raw.toFixed(1)}%`
+                                    );
+                                }
+                            }
+                        }
+                    },
+
+                    scales: {
 
                         y: {
 
@@ -754,11 +1628,14 @@ function renderAscensions(rows) {
                             ticks: {
 
                                 color:
-                                textMuted,
+                                    cssVariable(
+                                        "--text-muted"
+                                    ),
 
                                 callback(
                                     value
                                 ) {
+
                                     return (
                                         value +
                                         "%"
@@ -767,20 +1644,45 @@ function renderAscensions(rows) {
                             },
 
                             grid: {
+
                                 color:
-                                border
+                                    cssVariable(
+                                        "--border"
+                                    )
+                            }
+                        },
+
+                        x: {
+
+                            ticks: {
+
+                                color:
+                                    cssVariable(
+                                        "--text-muted"
+                                    ),
+
+                                maxTicksLimit:
+                                    10,
+
+                                callback(
+                                    value
+                                ) {
+
+                                    const iso =
+                                        this
+                                            .getLabelForValue(
+                                                value
+                                            );
+
+                                    return formatShortDate(
+                                        iso
+                                    );
+                                }
                             },
 
-                            title: {
-
+                            grid: {
                                 display:
-                                    true,
-
-                                text:
-                                    "Win Rate",
-
-                                color:
-                                textMuted
+                                    false
                             }
                         }
                     }
@@ -791,10 +1693,1154 @@ function renderAscensions(rows) {
 
 
 // ============================================================
+// PATCH MARKERS
+// ============================================================
+
+function buildPatchAnnotations(
+    rows
+) {
+
+    const firstRunByVersion =
+        new Map();
+
+
+    for (const row of rows) {
+
+        if (
+            !firstRunByVersion.has(
+                row.mod_version
+            )
+        ) {
+
+            firstRunByVersion.set(
+                row.mod_version,
+                row
+            );
+        }
+    }
+
+
+    const orderedVersions =
+        [...firstRunByVersion.keys()]
+            .sort(
+                compareVersions
+            );
+
+
+    const annotations =
+        {};
+
+
+    for (
+        let i = 1;
+        i <
+        orderedVersions.length;
+        i++
+    ) {
+
+        const previous =
+            orderedVersions[
+            i - 1
+                ];
+
+        const current =
+            orderedVersions[i];
+
+
+        if (
+            !isMajorPatch(
+                previous,
+                current
+            )
+        ) {
+            continue;
+        }
+
+
+        const run =
+            firstRunByVersion.get(
+                current
+            );
+
+
+        annotations[
+            `patch-${current}`
+            ] = {
+
+            type:
+                "line",
+
+            xMin:
+            run.received_at,
+
+            xMax:
+            run.received_at,
+
+            borderColor:
+                cssVariable(
+                    "--text-subtle"
+                ),
+
+            borderWidth:
+                1,
+
+            borderDash:
+                [6, 5],
+
+            label: {
+
+                display:
+                    true,
+
+                content:
+                    `v${current}`,
+
+                position:
+                    "start",
+
+                color:
+                    cssVariable(
+                        "--text-muted"
+                    ),
+
+                backgroundColor:
+                    cssVariable(
+                        "--panel-alt"
+                    ),
+
+                padding:
+                    4
+            }
+        };
+    }
+
+
+    return annotations;
+}
+
+
+function isMajorPatch(
+    previous,
+    current
+) {
+
+    const a =
+        previous
+            .split(".")
+            .map(Number);
+
+    const b =
+        current
+            .split(".")
+            .map(Number);
+
+
+    return (
+        a[0] !== b[0] ||
+        a[1] !== b[1]
+    );
+}
+
+
+// ============================================================
+// RECENT RUNS
+// ============================================================
+
+function renderRecentRuns() {
+
+    const container =
+        document.getElementById(
+            "recentRuns"
+        );
+
+    const button =
+        document.getElementById(
+            "showMoreRuns"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    const visible =
+        recentRuns.slice(
+            0,
+            visibleRunCount
+        );
+
+
+    container.innerHTML =
+        "";
+
+
+    for (
+        const run of visible
+        ) {
+
+        const row =
+            document.createElement(
+                "div"
+            );
+
+        row.className =
+            "run-row";
+
+
+        const resultClass =
+            run.win
+                ? "win"
+                : "loss";
+
+
+        const resultText =
+            run.win
+                ? "WIN"
+                : "LOSS";
+
+
+        const ascension =
+            run.ascension === null
+                ? "-"
+                : `A${run.ascension}`;
+
+
+        const killedBy =
+            run.win
+                ? "Completed run"
+                : (
+                    run.killed_by
+                        ? `Killed by ${cleanName(run.killed_by)}`
+                        : "Run ended"
+                );
+
+
+        row.innerHTML = `
+
+            <div>
+                <span class="run-result ${resultClass}">
+                    ${resultText}
+                </span>
+            </div>
+
+            <div class="run-primary">
+                ${ascension}
+                · Floor ${run.floor_reached ?? "-"}
+            </div>
+
+            <div class="run-secondary">
+                ${run.deck_size} cards
+                · ${run.relic_count} relics
+            </div>
+
+            <div class="run-secondary">
+                v${run.mod_version}
+            </div>
+
+            <div class="run-time">
+                ${killedBy}
+                · ${formatRelativeTime(run.received_at)}
+            </div>
+        `;
+
+
+        container.appendChild(
+            row
+        );
+    }
+
+
+    if (button) {
+
+        button.style.display =
+            visibleRunCount <
+            recentRuns.length
+                ? ""
+                : "none";
+    }
+}
+
+
+// ============================================================
+// RELICS
+// ============================================================
+
+function renderRelics(
+    rows
+) {
+
+    const body =
+        document.getElementById(
+            "relicTableBody"
+        );
+
+
+    if (!body) {
+        return;
+    }
+
+
+    const grouped =
+        new Map();
+
+
+    for (const row of rows) {
+
+        const id =
+            row.relic_id;
+
+
+        if (
+            !grouped.has(id)
+        ) {
+
+            grouped.set(
+                id,
+                {
+                    relicId:
+                    id,
+
+                    runs:
+                        0,
+
+                    wins:
+                        0
+                }
+            );
+        }
+
+
+        const item =
+            grouped.get(id);
+
+
+        item.runs +=
+            Number(
+                row.runs_with_relic ??
+                0
+            );
+
+
+        item.wins +=
+            Number(
+                row.wins_with_relic ??
+                0
+            );
+    }
+
+
+    const results =
+        [...grouped.values()]
+            .sort(
+                (a, b) =>
+                    b.runs -
+                    a.runs
+            );
+
+
+    body.innerHTML =
+        "";
+
+
+    for (
+        const item of results
+        ) {
+
+        const winRate =
+            item.runs > 0
+                ? item.wins /
+                item.runs *
+                100
+                : 0;
+
+
+        const row =
+            document.createElement(
+                "tr"
+            );
+
+
+        row.innerHTML = `
+            <td>${cleanName(item.relicId)}</td>
+            <td>${formatNumber(item.runs)}</td>
+            <td>${formatPercent(winRate)}</td>
+        `;
+
+
+        body.appendChild(
+            row
+        );
+    }
+}
+
+
+// ============================================================
+// CARDS
+// ============================================================
+
+function aggregateCards(
+    rows
+) {
+
+    const grouped =
+        new Map();
+
+
+    for (const row of rows) {
+
+        const id =
+            row.card_id;
+
+
+        if (!grouped.has(id)) {
+
+            grouped.set(
+                id,
+                {
+                    id,
+                    name:
+                        cleanName(id),
+
+                    offers:
+                        0,
+
+                    picks:
+                        0,
+
+                    runs:
+                        0,
+
+                    copies:
+                        0,
+
+                    wins:
+                        0,
+
+                    runsUpgraded:
+                        0,
+
+                    campfireUpgrades:
+                        0
+                }
+            );
+        }
+
+
+        const item =
+            grouped.get(id);
+
+
+        item.offers +=
+            Number(
+                row.offers ?? 0
+            );
+
+        item.picks +=
+            Number(
+                row.picks ?? 0
+            );
+
+        item.runs +=
+            Number(
+                row.runs_with_card ??
+                0
+            );
+
+        item.copies +=
+            Number(
+                row.total_copies ??
+                0
+            );
+
+        item.wins +=
+            Number(
+                row.wins_with_card ??
+                0
+            );
+
+        item.runsUpgraded +=
+            Number(
+                row.runs_upgraded ??
+                0
+            );
+
+        item.campfireUpgrades +=
+            Number(
+                row.campfire_upgrades ??
+                0
+            );
+    }
+
+
+    return [...grouped.values()]
+        .map(
+            item => ({
+
+                ...item,
+
+                pickRate:
+                    item.offers > 0
+                        ? item.picks /
+                        item.offers *
+                        100
+                        : null,
+
+                avgCopies:
+                    item.runs > 0
+                        ? item.copies /
+                        item.runs
+                        : null,
+
+                winRate:
+                    item.runs > 0
+                        ? item.wins /
+                        item.runs *
+                        100
+                        : null,
+
+                upgradeRate:
+                    item.runs > 0
+                        ? item.runsUpgraded /
+                        item.runs *
+                        100
+                        : null
+            })
+        );
+}
+
+function aggregateCardMatchups(
+    rows
+) {
+
+    const grouped =
+        new Map();
+
+
+    for (const row of rows) {
+
+        const pickedId =
+            row.picked_card_id;
+
+        const skippedId =
+            row.skipped_card_id;
+
+
+        if (!grouped.has(pickedId)) {
+
+            grouped.set(
+                pickedId,
+                new Map()
+            );
+        }
+
+
+        const matchupMap =
+            grouped.get(
+                pickedId
+            );
+
+
+        matchupMap.set(
+            skippedId,
+            (
+                matchupMap.get(
+                    skippedId
+                ) ?? 0
+            )
+            +
+            Number(
+                row.times_picked_over ??
+                0
+            )
+        );
+    }
+
+
+    return grouped;
+}
+
+function getTopPickedOver(
+    cardId
+) {
+
+    const matchupMap =
+        cardMatchups.get(
+            cardId
+        );
+
+
+    if (!matchupMap) {
+        return [];
+    }
+
+
+    const cardById =
+        new Map(
+            cardData.map(
+                card => [
+                    card.id,
+                    card
+                ]
+            )
+        );
+
+
+    return [...matchupMap.entries()]
+        .map(
+            ([otherId, count]) => {
+
+                const otherCard =
+                    cardById.get(
+                        otherId
+                    );
+
+
+                return {
+                    id:
+                    otherId,
+
+                    name:
+                        cleanName(
+                            otherId
+                        ),
+
+                    count,
+
+                    pickRate:
+                        otherCard
+                            ?.pickRate ??
+                        null
+                };
+            }
+        )
+        .sort(
+            (a, b) => {
+
+                if (
+                    b.count !==
+                    a.count
+                ) {
+
+                    return (
+                        b.count -
+                        a.count
+                    );
+                }
+
+
+                const aPick =
+                    a.pickRate ??
+                    -1;
+
+                const bPick =
+                    b.pickRate ??
+                    -1;
+
+
+                return (
+                    bPick -
+                    aPick
+                );
+            }
+        )
+        .slice(
+            0,
+            5
+        );
+}
+
+function renderCards() {
+
+    const grid =
+        document.getElementById(
+            "cardGrid"
+        );
+
+
+    if (!grid) {
+        return;
+    }
+
+
+    const search =
+        document
+            .getElementById(
+                "cardSearch"
+            )
+            .value
+            .trim()
+            .toLowerCase();
+
+
+    const sortBy =
+        document
+            .getElementById(
+                "cardSortBy"
+            )
+            .value;
+
+
+    const direction =
+        document
+            .getElementById(
+                "cardSortDirection"
+            )
+            .value;
+
+
+    const engineerOnly =
+        document
+            .getElementById(
+                "engineerCardsOnly"
+            )
+            ?.checked ??
+        false;
+
+
+    let filtered =
+        cardData.filter(
+            card => {
+
+                if (
+                    engineerOnly &&
+                    !card.id.startsWith(
+                        "THEENGINEER-"
+                    )
+                ) {
+                    return false;
+                }
+
+
+                return card.name
+                    .toLowerCase()
+                    .includes(
+                        search
+                    );
+            }
+        );
+
+
+    filtered =
+        [...filtered].sort(
+            (a, b) =>
+                compareCardValues(
+                    a,
+                    b,
+                    sortBy,
+                    direction
+                )
+        );
+
+
+    grid.innerHTML =
+        "";
+
+
+    for (
+        const card of filtered
+        ) {
+
+        const topPickedOver =
+            getTopPickedOver(
+                card.id
+            );
+
+
+        const tile =
+            document.createElement(
+                "article"
+            );
+
+
+        tile.className =
+            "card-tile";
+
+
+        tile.tabIndex =
+            0;
+
+
+        tile.setAttribute(
+            "aria-expanded",
+            "false"
+        );
+
+
+        tile.innerHTML = `
+
+            <div class="card-main">
+
+                <h3 class="card-title">
+                    ${card.name}
+                </h3>
+
+                <div class="card-metrics card-main-metrics">
+
+                    ${cardMetric(
+            "Win Rate",
+            nullablePercent(
+                card.winRate
+            )
+        )}
+
+                    ${cardMetric(
+            "Pick Rate",
+            nullablePercent(
+                card.pickRate
+            )
+        )}
+
+                    ${cardMetric(
+            "Upgrade Rate",
+            nullablePercent(
+                card.upgradeRate
+            )
+        )}
+
+                </div>
+
+                <div class="card-expand-hint">
+                    Click for details
+                </div>
+
+            </div>
+
+
+            <div class="card-details">
+
+                <div class="card-details-grid">
+
+                    <div>
+
+                        <h4>
+                            Full Breakdown
+                        </h4>
+
+                        <div class="card-extra-grid">
+
+                            ${extraMetric(
+            "Offers",
+            formatNumber(
+                card.offers
+            )
+        )}
+
+                            ${extraMetric(
+            "Picks",
+            formatNumber(
+                card.picks
+            )
+        )}
+
+                            ${extraMetric(
+            "Pick Rate",
+            nullablePercent(
+                card.pickRate
+            )
+        )}
+
+                            ${extraMetric(
+            "Runs containing card",
+            formatNumber(
+                card.runs
+            )
+        )}
+
+                            ${extraMetric(
+            "Total copies",
+            formatNumber(
+                card.copies
+            )
+        )}
+
+                            ${extraMetric(
+            "Average copies",
+            nullableDecimal(
+                card.avgCopies,
+                2
+            )
+        )}
+
+                            ${extraMetric(
+            "Wins",
+            formatNumber(
+                card.wins
+            )
+        )}
+
+                            ${extraMetric(
+            "Win Rate",
+            nullablePercent(
+                card.winRate
+            )
+        )}
+
+                            ${extraMetric(
+            "Runs upgraded",
+            formatNumber(
+                card.runsUpgraded
+            )
+        )}
+
+                            ${extraMetric(
+            "Campfire upgrades",
+            formatNumber(
+                card.campfireUpgrades
+            )
+        )}
+
+                            ${extraMetric(
+            "Upgrade Rate",
+            nullablePercent(
+                card.upgradeRate
+            )
+        )}
+
+                        </div>
+
+                    </div>
+
+
+                    <div>
+
+                        <h4>
+                            Picked Over Most
+                        </h4>
+
+                        ${renderPickedOverList(
+            topPickedOver
+        )}
+
+                    </div>
+
+                </div>
+
+            </div>
+        `;
+
+
+        tile.addEventListener(
+            "click",
+            () =>
+                toggleCardTile(
+                    tile
+                )
+        );
+
+
+        tile.addEventListener(
+            "keydown",
+            event => {
+
+                if (
+                    event.key ===
+                    "Enter" ||
+                    event.key ===
+                    " "
+                ) {
+
+                    event
+                        .preventDefault();
+
+
+                    toggleCardTile(
+                        tile
+                    );
+                }
+            }
+        );
+
+
+        grid.appendChild(
+            tile
+        );
+    }
+}
+
+function toggleCardTile(
+    tile
+) {
+
+    const expanded =
+        tile.classList.toggle(
+            "expanded"
+        );
+
+
+    tile.setAttribute(
+        "aria-expanded",
+        expanded
+            ? "true"
+            : "false"
+    );
+}
+
+
+function renderPickedOverList(
+    rows
+) {
+
+    if (
+        rows.length === 0
+    ) {
+
+        return `
+            <p class="empty-state">
+                No matchup data.
+            </p>
+        `;
+    }
+
+
+    return `
+        <ol class="picked-over-list">
+
+            ${
+        rows.map(
+            row => `
+                        <li>
+
+                            <span class="picked-over-name">
+                                ${row.name}
+                            </span>
+
+                            <span class="picked-over-count">
+                                ${formatNumber(row.count)}×
+                            </span>
+
+                            <span class="picked-over-rate">
+                                ${
+                row.pickRate === null
+                    ? ""
+                    : `${formatPercent(row.pickRate)} pick rate`
+            }
+                            </span>
+
+                        </li>
+                    `
+        ).join("")
+    }
+
+        </ol>
+    `;
+}
+
+
+function cardMetric(
+    label,
+    value
+) {
+
+    return `
+        <div class="card-metric">
+
+            <span>
+                ${label}
+            </span>
+
+            <strong>
+                ${value}
+            </strong>
+
+        </div>
+    `;
+}
+
+
+function extraMetric(
+    label,
+    value
+) {
+
+    return `
+        <span class="card-extra-label">
+            ${label}
+        </span>
+
+        <strong>
+            ${value}
+        </strong>
+    `;
+}
+
+
+function compareCardValues(
+    a,
+    b,
+    property,
+    direction
+) {
+
+    if (
+        property === "name"
+    ) {
+
+        const result =
+            a.name.localeCompare(
+                b.name
+            );
+
+
+        return direction ===
+        "asc"
+            ? result
+            : -result;
+    }
+
+
+    const av =
+        a[property];
+
+    const bv =
+        b[property];
+
+
+    if (
+        av === null &&
+        bv === null
+    ) {
+        return 0;
+    }
+
+    if (av === null) {
+        return 1;
+    }
+
+    if (bv === null) {
+        return -1;
+    }
+
+
+    const result =
+        av - bv;
+
+
+    return direction ===
+    "asc"
+        ? result
+        : -result;
+}
+
+
+// ============================================================
 // ENEMIES
 // ============================================================
 
-function renderEnemies(rows) {
+function renderEnemies(
+    rows
+) {
+
+    const body =
+        document.getElementById(
+            "enemyTableBody"
+        );
+
+
+    if (!body) {
+        return;
+    }
+
 
     const grouped =
         new Map();
@@ -806,7 +2852,9 @@ function renderEnemies(rows) {
             row.encounter;
 
 
-        if (!grouped.has(id)) {
+        if (
+            !grouped.has(id)
+        ) {
 
             grouped.set(
                 id,
@@ -859,12 +2907,15 @@ function renderEnemies(rows) {
         item.totalTurns +=
             Number(
                 row.avg_turns ?? 0
-            ) * fights;
+            ) *
+            fights;
+
 
         item.totalDamage +=
             Number(
                 row.avg_damage ?? 0
-            ) * fights;
+            ) *
+            fights;
     }
 
 
@@ -877,11 +2928,13 @@ function renderEnemies(rows) {
             );
 
 
-    enemyTableBody.innerHTML =
+    body.innerHTML =
         "";
 
 
-    for (const item of results) {
+    for (
+        const item of results
+        ) {
 
         const survivalRate =
             item.fights > 0
@@ -921,7 +2974,7 @@ function renderEnemies(rows) {
         `;
 
 
-        enemyTableBody.appendChild(
+        body.appendChild(
             row
         );
     }
@@ -929,284 +2982,312 @@ function renderEnemies(rows) {
 
 
 // ============================================================
-// CARDS
+// SORTABLE TABLES
 // ============================================================
 
-function renderCards(rows) {
+function enableTableSorting() {
 
-    const grouped =
-        new Map();
+    document
+        .querySelectorAll(
+            "table.sortable th[data-sort]"
+        )
+        .forEach(
+            header => {
 
+                header.addEventListener(
+                    "click",
+                    () => {
 
-    for (const row of rows) {
+                        const table =
+                            header.closest(
+                                "table"
+                            );
 
-        const id =
-            row.card_id;
-
-
-        if (!grouped.has(id)) {
-
-            grouped.set(
-                id,
-                {
-                    cardId:
-                    id,
-
-                    offers:
-                        0,
-
-                    picks:
-                        0,
-
-                    runs:
-                        0,
-
-                    copies:
-                        0,
-
-                    wins:
-                        0
-                }
-            );
-        }
+                        const body =
+                            table.querySelector(
+                                "tbody"
+                            );
 
 
-        const item =
-            grouped.get(id);
+                        const headers =
+                            [...table.querySelectorAll(
+                                "th"
+                            )];
 
 
-        item.offers +=
-            Number(
-                row.offers ?? 0
-            );
+                        const index =
+                            headers.indexOf(
+                                header
+                            );
 
 
-        item.picks +=
-            Number(
-                row.picks ?? 0
-            );
+                        const type =
+                            header.dataset.sort;
 
 
-        item.runs +=
-            Number(
-                row.runs_with_card ??
-                0
-            );
+                        const direction =
+                            header.dataset
+                                .direction ===
+                            "asc"
+                                ? "desc"
+                                : "asc";
 
 
-        item.copies +=
-            Number(
-                row.total_copies ??
-                0
-            );
+                        headers.forEach(
+                            other => {
+
+                                if (
+                                    other !==
+                                    header
+                                ) {
+
+                                    delete other
+                                        .dataset
+                                        .direction;
+                                }
+                            }
+                        );
 
 
-        // Exact raw win count.
-        // No reconstruction from rounded %.
-
-        item.wins +=
-            Number(
-                row.wins_with_card ??
-                0
-            );
-    }
+                        header.dataset
+                            .direction =
+                            direction;
 
 
-    const results =
-        [...grouped.values()]
-            .sort(
-                (a, b) =>
-                    b.offers -
-                    a.offers
-            );
+                        const rows =
+                            [...body.querySelectorAll(
+                                "tr"
+                            )];
 
 
-    cardTableBody.innerHTML =
-        "";
+                        rows.sort(
+                            (a, b) =>
+                                compareTableRows(
+                                    a,
+                                    b,
+                                    index,
+                                    type,
+                                    direction
+                                )
+                        );
 
 
-    for (const item of results) {
-
-        const pickRate =
-            item.offers > 0
-                ? item.picks /
-                item.offers *
-                100
-                : null;
-
-
-        const avgCopies =
-            item.runs > 0
-                ? item.copies /
-                item.runs
-                : null;
-
-
-        const winRate =
-            item.runs > 0
-                ? item.wins /
-                item.runs *
-                100
-                : null;
-
-
-        const row =
-            document.createElement(
-                "tr"
-            );
-
-
-        row.innerHTML = `
-            <td>${cleanName(item.cardId)}</td>
-
-            <td>
-                ${formatNumber(item.offers)}
-            </td>
-
-            <td>
-                ${formatNumber(item.picks)}
-            </td>
-
-            <td>
-                ${
-            pickRate === null
-                ? "-"
-                : formatPercent(
-                    pickRate
-                )
-        }
-            </td>
-
-            <td>
-                ${formatNumber(item.runs)}
-            </td>
-
-            <td>
-                ${
-            avgCopies === null
-                ? "-"
-                : avgCopies.toFixed(2)
-        }
-            </td>
-
-            <td>
-                ${
-            winRate === null
-                ? "-"
-                : formatPercent(
-                    winRate
-                )
-        }
-            </td>
-        `;
-
-
-        cardTableBody.appendChild(
-            row
+                        body.replaceChildren(
+                            ...rows
+                        );
+                    }
+                );
+            }
         );
+}
+
+
+function compareTableRows(
+    a,
+    b,
+    index,
+    type,
+    direction
+) {
+
+    const aText =
+        a.children[index]
+            ?.textContent
+            ?.trim() ?? "";
+
+    const bText =
+        b.children[index]
+            ?.textContent
+            ?.trim() ?? "";
+
+
+    if (
+        type === "number"
+    ) {
+
+        const av =
+            parseSortableNumber(
+                aText
+            );
+
+        const bv =
+            parseSortableNumber(
+                bText
+            );
+
+
+        const aMissing =
+            Number.isNaN(av);
+
+        const bMissing =
+            Number.isNaN(bv);
+
+
+        if (
+            aMissing &&
+            bMissing
+        ) {
+            return 0;
+        }
+
+        if (aMissing) {
+            return 1;
+        }
+
+        if (bMissing) {
+            return -1;
+        }
+
+
+        const result =
+            av - bv;
+
+
+        return direction ===
+        "asc"
+            ? result
+            : -result;
     }
+
+
+    const result =
+        aText.localeCompare(
+            bText,
+            undefined,
+            {
+                numeric:
+                    true,
+
+                sensitivity:
+                    "base"
+            }
+        );
+
+
+    return direction ===
+    "asc"
+        ? result
+        : -result;
+}
+
+
+function parseSortableNumber(
+    text
+) {
+
+    if (
+        !text ||
+        text === "-"
+    ) {
+        return NaN;
+    }
+
+
+    return Number.parseFloat(
+        text
+            .replaceAll(
+                ",",
+                ""
+            )
+            .replace(
+                "%",
+                ""
+            )
+    );
 }
 
 
 // ============================================================
-// RELICS
+// TABLE SEARCH
 // ============================================================
 
-function renderRelics(rows) {
+function enableTableSearch() {
 
-    const grouped =
-        new Map();
+    document
+        .querySelectorAll(
+            ".table-search"
+        )
+        .forEach(
+            input => {
 
-
-    for (const row of rows) {
-
-        const id =
-            row.relic_id;
-
-
-        if (!grouped.has(id)) {
-
-            grouped.set(
-                id,
-                {
-                    relicId:
-                    id,
-
-                    runs:
-                        0,
-
-                    wins:
-                        0
-                }
-            );
-        }
-
-
-        const item =
-            grouped.get(id);
-
-
-        item.runs +=
-            Number(
-                row.runs_with_relic ??
-                0
-            );
-
-
-        item.wins +=
-            Number(
-                row.wins_with_relic ??
-                0
-            );
-    }
-
-
-    const results =
-        [...grouped.values()]
-            .sort(
-                (a, b) =>
-                    b.runs -
-                    a.runs
-            );
-
-
-    relicTableBody.innerHTML =
-        "";
-
-
-    for (const item of results) {
-
-        const winRate =
-            item.runs > 0
-                ? item.wins /
-                item.runs *
-                100
-                : 0;
-
-
-        const row =
-            document.createElement(
-                "tr"
-            );
-
-
-        row.innerHTML = `
-            <td>${cleanName(item.relicId)}</td>
-            <td>${formatNumber(item.runs)}</td>
-            <td>${formatPercent(winRate)}</td>
-        `;
-
-
-        relicTableBody.appendChild(
-            row
+                input.addEventListener(
+                    "input",
+                    () =>
+                        applyTableSearch(
+                            input
+                        )
+                );
+            }
         );
+}
+
+
+function applyTableSearch(
+    input
+) {
+
+    const table =
+        document.getElementById(
+            input.dataset.table
+        );
+
+
+    if (!table) {
+        return;
     }
+
+
+    const search =
+        input.value
+            .trim()
+            .toLowerCase();
+
+
+    table
+        .querySelectorAll(
+            "tbody tr"
+        )
+        .forEach(
+            row => {
+
+                row.style.display =
+                    row.textContent
+                        .toLowerCase()
+                        .includes(
+                            search
+                        )
+                        ? ""
+                        : "none";
+            }
+        );
+}
+
+
+function applyAllTableSearches() {
+
+    document
+        .querySelectorAll(
+            ".table-search"
+        )
+        .forEach(
+            applyTableSearch
+        );
 }
 
 
 // ============================================================
 // HELPERS
 // ============================================================
+
+function checkError(
+    result
+) {
+
+    if (result.error) {
+        throw result.error;
+    }
+}
+
 
 function sum(
     rows,
@@ -1241,7 +3322,6 @@ function weightedAverage(
                 row[valueField]
             );
 
-
         const rowWeight =
             Number(
                 row[weightField] ??
@@ -1250,7 +3330,9 @@ function weightedAverage(
 
 
         if (
-            !Number.isFinite(value) ||
+            !Number.isFinite(
+                value
+            ) ||
             rowWeight <= 0
         ) {
             continue;
@@ -1266,49 +3348,15 @@ function weightedAverage(
     }
 
 
-    if (weight === 0) {
-        return null;
-    }
-
-
-    return total / weight;
+    return weight > 0
+        ? total / weight
+        : null;
 }
 
 
-function formatNumber(value) {
-
-    return Number(
-        value ?? 0
-    ).toLocaleString();
-}
-
-
-function formatPercent(value) {
-
-    return `${
-        Number(
-            value ?? 0
-        ).toFixed(1)
-    }%`;
-}
-
-
-function formatDecimal(value) {
-
-    if (
-        value === null ||
-        value === undefined ||
-        !Number.isFinite(value)
-    ) {
-        return "-";
-    }
-
-
-    return value.toFixed(1);
-}
-
-
-function cleanName(value) {
+function cleanName(
+    value
+) {
 
     if (!value) {
         return "-";
@@ -1333,344 +3381,198 @@ function cleanName(value) {
 }
 
 
-function cssVariable(
-    name,
-    fallback
+function formatNumber(
+    value
 ) {
 
-    const value =
-        getComputedStyle(
-            document.documentElement
-        )
-            .getPropertyValue(name)
-            .trim();
-
-
-    return value || fallback;
+    return Number(
+        value ?? 0
+    ).toLocaleString();
 }
 
 
-// ============================================================
-// SORTABLE TABLES
-// ============================================================
-
-function enableTableSorting() {
-
-    document
-        .querySelectorAll(
-            "table.sortable th[data-sort]"
-        )
-        .forEach(
-            header => {
-
-                header.addEventListener(
-                    "click",
-                    () => {
-
-                        const table =
-                            header.closest(
-                                "table"
-                            );
-
-                        const tbody =
-                            table.querySelector(
-                                "tbody"
-                            );
-
-
-                        const headers = [
-                            ...table.querySelectorAll(
-                                "th"
-                            )
-                        ];
-
-
-                        const columnIndex =
-                            headers.indexOf(
-                                header
-                            );
-
-
-                        const type =
-                            header.dataset
-                                .sort;
-
-
-                        const currentDirection =
-                            header.dataset
-                                .direction;
-
-
-                        const direction =
-                            currentDirection ===
-                            "asc"
-                                ? "desc"
-                                : "asc";
-
-
-                        headers.forEach(
-                            otherHeader => {
-
-                                if (
-                                    otherHeader !==
-                                    header
-                                ) {
-
-                                    delete otherHeader
-                                        .dataset
-                                        .direction;
-                                }
-                            }
-                        );
-
-
-                        header.dataset
-                            .direction =
-                            direction;
-
-
-                        const rows = [
-                            ...tbody.querySelectorAll(
-                                "tr"
-                            )
-                        ];
-
-
-                        rows.sort(
-                            (a, b) => {
-
-                                const aText =
-                                    a.children[
-                                        columnIndex
-                                        ]
-                                        ?.textContent
-                                        ?.trim() ??
-                                    "";
-
-
-                                const bText =
-                                    b.children[
-                                        columnIndex
-                                        ]
-                                        ?.textContent
-                                        ?.trim() ??
-                                    "";
-
-
-                                if (
-                                    type ===
-                                    "number"
-                                ) {
-
-                                    const aValue =
-                                        parseSortableNumber(
-                                            aText
-                                        );
-
-
-                                    const bValue =
-                                        parseSortableNumber(
-                                            bText
-                                        );
-
-
-                                    const aMissing =
-                                        Number.isNaN(
-                                            aValue
-                                        );
-
-
-                                    const bMissing =
-                                        Number.isNaN(
-                                            bValue
-                                        );
-
-
-                                    // Missing values always
-                                    // remain at the bottom.
-
-                                    if (
-                                        aMissing &&
-                                        bMissing
-                                    ) {
-                                        return 0;
-                                    }
-
-
-                                    if (aMissing) {
-                                        return 1;
-                                    }
-
-
-                                    if (bMissing) {
-                                        return -1;
-                                    }
-
-
-                                    const comparison =
-                                        aValue -
-                                        bValue;
-
-
-                                    return direction ===
-                                    "asc"
-                                        ? comparison
-                                        : -comparison;
-                                }
-
-
-                                const comparison =
-                                    aText.localeCompare(
-                                        bText,
-                                        undefined,
-                                        {
-                                            numeric:
-                                                true,
-
-                                            sensitivity:
-                                                "base"
-                                        }
-                                    );
-
-
-                                return direction ===
-                                "asc"
-                                    ? comparison
-                                    : -comparison;
-                            }
-                        );
-
-
-                        tbody.replaceChildren(
-                            ...rows
-                        );
-                    }
-                );
-            }
-        );
-}
-
-
-function parseSortableNumber(
-    text
+function formatPercent(
+    value
 ) {
 
-    if (
-        !text ||
-        text === "-"
-    ) {
-        return NaN;
-    }
-
-
-    const cleaned =
-        text
-            .replaceAll(
-                ",",
-                ""
-            )
-            .replace(
-                "%",
-                ""
-            )
-            .trim();
-
-
-    return Number.parseFloat(
-        cleaned
+    return (
+        Number(
+            value ?? 0
+        ).toFixed(1) +
+        "%"
     );
 }
 
 
-// ============================================================
-// TABLE SEARCH
-// ============================================================
+function nullablePercent(
+    value
+) {
 
-function enableTableSearch() {
-
-    document
-        .querySelectorAll(
-            ".table-search"
-        )
-        .forEach(
-            input => {
-
-                input.addEventListener(
-                    "input",
-                    () =>
-                        applyTableSearch(
-                            input
-                        )
-                );
-            }
+    return value === null
+        ? "-"
+        : formatPercent(
+            value
         );
 }
 
 
-function applyTableSearch(
-    input
+function formatDecimal(
+    value
 ) {
 
-    const tableId =
-        input.dataset.table;
-
-
-    const table =
-        document.getElementById(
-            tableId
-        );
-
-
-    if (!table) {
-        return;
+    if (
+        value === null ||
+        !Number.isFinite(
+            value
+        )
+    ) {
+        return "-";
     }
 
 
-    const query =
-        input.value
-            .trim()
-            .toLowerCase();
+    return value.toFixed(1);
+}
 
 
-    const rows =
-        table.querySelectorAll(
-            "tbody tr"
+function nullableDecimal(
+    value,
+    decimals
+) {
+
+    return value === null
+        ? "-"
+        : value.toFixed(
+            decimals
         );
+}
 
 
-    rows.forEach(
-        row => {
+function formatShortDate(
+    value
+) {
 
-            const text =
-                row.textContent
-                    .toLowerCase();
+    return new Date(
+        value
+    ).toLocaleDateString(
+        undefined,
+        {
+            month:
+                "short",
 
-
-            const matches =
-                text.includes(
-                    query
-                );
-
-
-            row.style.display =
-                matches
-                    ? ""
-                    : "none";
+            day:
+                "numeric"
         }
     );
 }
 
 
-function applyAllTableSearches() {
+function formatDateTime(
+    value
+) {
 
-    document
-        .querySelectorAll(
-            ".table-search"
-        )
-        .forEach(
-            input =>
-                applyTableSearch(
-                    input
-                )
+    return new Date(
+        value
+    ).toLocaleString();
+}
+
+
+function formatRelativeTime(
+    value
+) {
+
+    const date =
+        new Date(value);
+
+    const seconds =
+        Math.round(
+            (
+                date -
+                new Date()
+            ) /
+            1000
         );
+
+
+    const formatter =
+        new Intl.RelativeTimeFormat(
+            undefined,
+            {
+                numeric:
+                    "auto"
+            }
+        );
+
+
+    if (
+        Math.abs(seconds) <
+        60
+    ) {
+
+        return formatter.format(
+            seconds,
+            "second"
+        );
+    }
+
+
+    const minutes =
+        Math.round(
+            seconds / 60
+        );
+
+
+    if (
+        Math.abs(minutes) <
+        60
+    ) {
+
+        return formatter.format(
+            minutes,
+            "minute"
+        );
+    }
+
+
+    const hours =
+        Math.round(
+            minutes / 60
+        );
+
+
+    if (
+        Math.abs(hours) <
+        24
+    ) {
+
+        return formatter.format(
+            hours,
+            "hour"
+        );
+    }
+
+
+    const days =
+        Math.round(
+            hours / 24
+        );
+
+
+    return formatter.format(
+        days,
+        "day"
+    );
+}
+
+
+function cssVariable(
+    name
+) {
+
+    return getComputedStyle(
+        document.documentElement
+    )
+        .getPropertyValue(
+            name
+        )
+        .trim();
 }
